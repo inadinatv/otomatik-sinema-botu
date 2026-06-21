@@ -2,8 +2,12 @@ name: Otomatik Film Botu
 
 on:
   schedule:
-    - cron: '0 0,12 * * *' # Her gün saat 00:00 ve 12:00'da çalışır (Günde 2 kez)
-  workflow_dispatch: # GitHub üzerinden manuel başlatabilmeniz için buton ekler
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:
+
+# GITHUB BOTUNA YAZMA YETKİSİ VERİYORUZ
+permissions:
+  contents: write
 
 jobs:
   scrape-and-update:
@@ -28,5 +32,11 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add veritabani.json
-          git commit -m "🤖 Otomatik Güncelleme: Yeni filmler eklendi" || echo "Güncellenecek yeni film yok"
-          git push
+          
+          # Eğer dosyada değişiklik varsa kaydet, yoksa atla
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "🤖 Otomatik Güncelleme: Yeni filmler eklendi"
+            git push
+          else
+            echo "Kütüphane zaten güncel, değişiklik yapılmadı."
+          fi
