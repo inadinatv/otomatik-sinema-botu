@@ -9,14 +9,36 @@ from curl_cffi import requests
 BASE_URL = "https://www.fullhdfilmizlesene.life"
 DB_FILE = "veritabani.json"
 
+# İstediğiniz Tüm Kategoriler
 KATEGORILER = {
-    "Aksiyon": "/filmizle/aksiyon-filmleri-hdf-izle/",
-    "Bilim Kurgu": "/filmizle/bilim-kurgu-filmleri-izle-2/",
-    "Animasyon": "/filmizle/animasyon-filmleri-izle-1/",
-    "Korku": "/filmizle/korku-filmleri-izle-1/"
+    "En Çok İzlenen Filmler": "/en-cok-izlenen-filmler-izle-hd/",
+    "IMDB Puanı Yüksek Filmler": "/filmizle/imdb-puani-yuksek-filmler-izle-1/",
+    "Aile Filmleri": "/filmizle/aile-filmleri-hdf-izle/",
+    "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri-hdf-izle/",
+    "Animasyon Filmleri": "/filmizle/animasyon-filmleri-fhd-izle/",
+    "Belgeseller": "/filmizle/belgesel-filmleri-izle/",
+    "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri-izle-2/",
+    "Blu Ray Filmler": "/filmizle/bluray-filmler-izle/",
+    "Çizgi Filmler": "/filmizle/cizgi-filmler-fhd-izle/",
+    "Dram Filmleri": "/filmizle/dram-filmleri-hd-izle/",
+    "Fantastik Filmler": "/filmizle/fantastik-filmler-hd-izle/",
+    "Gerilim Filmleri": "/filmizle/gerilim-filmleri-fhd-izle/",
+    "Gizem Filmleri": "/filmizle/gizem-filmleri-hd-izle/",
+    "Hint Filmleri": "/filmizle/hint-filmleri-fhd-izle/",
+    "Komedi Filmleri": "/filmizle/komedi-filmleri-fhd-izle/",
+    "Korku Filmleri": "/filmizle/korku-filmleri-izle-3/",
+    "Macera Filmleri": "/filmizle/macera-filmleri-fhd-izle/",
+    "Müzikal Filmler": "/filmizle/muzikal-filmler-izle/",
+    "Polisiye Filmleri": "/filmizle/polisiye-filmleri-izle/",
+    "Psikolojik Filmler": "/filmizle/psikolojik-filmler-izle/",
+    "Romantik Filmler": "/filmizle/romantik-filmler-fhd-izle/",
+    "Savaş Filmleri": "/filmizle/savas-filmleri-fhd-izle/",
+    "Suç Filmleri": "/filmizle/suc-filmleri-izle/",
+    "Tarih Filmleri": "/filmizle/tarih-filmleri-fhd-izle/",
+    "Western Filmler": "/filmizle/western-filmler-hd-izle-3/",
+    "Yerli Filmler": "/filmizle/yerli-filmler-hd-izle/"
 }
 
-# GitHub'a kurduğumuz WARP VPN tünelinin adresini veriyoruz
 PROXY = {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}
 
 session = requests.Session(impersonate="chrome120", proxies=PROXY)
@@ -44,9 +66,22 @@ def extract_movie_data(film_url):
         req = session.get(film_url, timeout=15)
         soup = BeautifulSoup(req.text, 'html.parser')
         
-        ozet_elem = soup.select_one(".ozet, .summary, p[itemprop='description']")
-        aciklama = ozet_elem.text.strip() if ozet_elem else "Açıklama bulunamadı."
-        
+        # --- FİLM AÇIKLAMASINI (ÖZETİ) KESİN OLARAK ÇEKME ALGORİTMASI ---
+        aciklama = ""
+        ozet_div = soup.select_one(".ozet, .summary, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
+        if ozet_div:
+            aciklama = ozet_div.text.strip()
+            
+        # Sayfada görünür yazı yoksa Sitenin Koduna (Meta tag) iniyoruz (Kesin Çözüm)
+        if not aciklama or len(aciklama) < 10:
+            meta_desc = soup.select_one('meta[name="description"]')
+            if meta_desc:
+                aciklama = meta_desc.get("content", "").strip()
+                
+        if not aciklama:
+            aciklama = "Bu film için herhangi bir açıklama veya özet bulunamadı."
+        # -----------------------------------------------------------------
+
         iframe_linki = None
         scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
         if scx_match:
@@ -66,8 +101,8 @@ def extract_movie_data(film_url):
 
         return {"aciklama": aciklama, "iframe": iframe_linki}
     except Exception as e:
-        print(f"      [!] Hata: {e}")
-        return {"aciklama": "", "iframe": None}
+        print(f"      [!] Film bilgisi cekilemedi: {e}")
+        return {"aciklama": "Veri alınamadı.", "iframe": None}
 
 def bot_calistir():
     if os.path.exists(DB_FILE):
@@ -84,23 +119,19 @@ def bot_calistir():
         try:
             req = session.get(BASE_URL + url_yolu, timeout=20)
             
-            # Hata varsa artık bize dürüstçe söyleyecek
             if req.status_code != 200:
-                print(f"  [!] Site engelledi. HTTP Hatasi: {req.status_code}")
-                continue
-                
-            if "Just a moment" in req.text or "cf-browser-verification" in req.text:
-                print("  [!] Cloudflare engeli VPN'e rağmen aşılamadı!")
+                print(f"  [!] HTTP Hatasi: {req.status_code}")
                 continue
 
             soup = BeautifulSoup(req.content, 'html.parser')
+            # LİMİT KALDIRILDI! Sitede o an sayfada ne kadar film varsa hepsini tarar.
             film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
             
             if not film_listesi:
-                print("  [!] Bu sayfada film bulunamadı, site linki veya yapısı değişmiş olabilir.")
+                print("  [!] Bu sayfada film bulunamadı.")
                 continue
 
-            for li in film_listesi[:10]:
+            for li in film_listesi:
                 baslik_elem = li.select_one("span.film-title, h2.title, a.title")
                 baslik = baslik_elem.text.strip() if baslik_elem else ""
                 
@@ -118,7 +149,7 @@ def bot_calistir():
                 detay = extract_movie_data(film_url)
                 
                 if detay["iframe"]:
-                    print(f"    ✅ İframe bulundu!")
+                    print(f"    ✅ İframe & Film Bilgisi Eklendi.")
                     veritabani["filmler"].insert(0, {
                         "id": len(veritabani["filmler"]) + 1,
                         "baslik": baslik,
@@ -129,8 +160,6 @@ def bot_calistir():
                     })
                     mevcut_basliklar.append(baslik)
                     yeni_film_eklendi = True
-                else:
-                    print(f"    ❌ İframe (oynatıcı) yok.")
         except Exception as e:
             print(f"  [!] Kategori Hatasi: {e}")
 
