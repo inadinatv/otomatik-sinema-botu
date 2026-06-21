@@ -1,0 +1,32 @@
+name: Otomatik Film Botu
+
+on:
+  schedule:
+    - cron: '0 0,12 * * *' # Her gün saat 00:00 ve 12:00'da çalışır (Günde 2 kez)
+  workflow_dispatch: # GitHub üzerinden manuel başlatabilmeniz için buton ekler
+
+jobs:
+  scrape-and-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu İndir
+        uses: actions/checkout@v3
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Gerekli Modülleri Yükle
+        run: pip install -r requirements.txt
+
+      - name: Botu Çalıştır ve Filmleri Çek
+        run: python bot.py
+
+      - name: Yeni Verileri GitHub'a Kaydet
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add veritabani.json
+          git commit -m "🤖 Otomatik Güncelleme: Yeni filmler eklendi" || echo "Güncellenecek yeni film yok"
+          git push
