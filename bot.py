@@ -9,12 +9,11 @@ from curl_cffi import requests
 BASE_URL = "https://www.fullhdfilmizlesene.life"
 DB_FILE = "veritabani.json"
 
-# SİTENİN GÜNCEL VE KESİN LİNKLERİ (Ekran görüntünüze göre aralarında sadece tire olan temiz linkler)
 KATEGORILER = {
     "Aile Filmleri": "/filmizle/aile-filmleri/",
     "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri/",
     "Animasyon Filmleri": "/filmizle/animasyon-filmleri/",
-    "Belgeseller": "/filmizle/belgeseller/",
+    "Belgeseller": "/filmizle/belgesel-filmleri/",
     "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri/",
     "Blu Ray Filmler": "/filmizle/bluray-filmler/",
     "Çizgi Filmler": "/filmizle/cizgi-filmler/",
@@ -63,23 +62,17 @@ def extract_movie_data(film_url):
         req = session.get(film_url, timeout=15)
         soup = BeautifulSoup(req.text, 'html.parser')
         
-        # FİLM BİLGİSİ (ÖZET) ÇEKME MOTORU (Sağlamlaştırıldı)
         aciklama = ""
         ozet_div = soup.select_one(".ozet, .summary, .film-content, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
-        if ozet_div: 
-            aciklama = ozet_div.text.strip()
+        if ozet_div: aciklama = ozet_div.text.strip()
         if not aciklama or len(aciklama) < 10:
             paragraphs = soup.select('article p, .post-content p')
-            if paragraphs:
-                aciklama = " ".join([p.text.strip() for p in paragraphs if len(p.text.strip()) > 15])
+            if paragraphs: aciklama = " ".join([p.text.strip() for p in paragraphs if len(p.text.strip()) > 15])
         if not aciklama or len(aciklama) < 10:
             meta_desc = soup.select_one('meta[name="description"]')
-            if meta_desc: 
-                aciklama = meta_desc.get("content", "").strip()
-        if not aciklama: 
-            aciklama = "Bu film için açıklama bulunamadı."
+            if meta_desc: aciklama = meta_desc.get("content", "").strip()
+        if not aciklama: aciklama = "Bu film için açıklama bulunamadı."
 
-        # İFRAME (VİDEO) ÇEKME MOTORU
         iframe_linki = None
         scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
         if scx_match:
@@ -106,40 +99,33 @@ def bot_calistir():
         with open(DB_FILE, "r", encoding="utf-8") as f: veritabani = json.load(f)
     else: veritabani = {"kategoriler": list(KATEGORILER.keys()), "filmler": []}
 
-    # Hangi filmlerin olduğunu hafızaya al
     mevcut_basliklar = [film["baslik"] for film in veritabani.get("filmler", [])]
     yeni_film_eklendi = False
     
     for kategori_adi, url_yolu in KATEGORILER.items():
         print(f"\n>> Taraniyor: {kategori_adi}")
         
-        # --- MÜTHİŞ YENİLİK: SAYFALAMA (DEEP SCAN) ---
-        # Sadece 1. sayfayı değil, her kategorinin ilk 4 sayfasını kazar!
-        # (Bu sayede binlerce eski/yeni film tek seferde toplanacak)
-        for sayfa in range(1, 5): 
-            if sayfa == 1:
-                hedef_url = BASE_URL + url_yolu
-            else:
-                hedef_url = BASE_URL + url_yolu + f"sayfa-{sayfa}/"
+        # Sayfalama: Her kategorinin ilk 4 sayfasındaki tüm filmleri çeker
+        for sayfa in range(1, 4): 
+            hedef_url = BASE_URL + url_yolu if sayfa == 1 else BASE_URL + url_yolu + f"sayfa-{sayfa}/"
                 
             try:
                 req = session.get(hedef_url, timeout=20)
-                
-                # Eğer sayfa yoksa (örneğin 4. sayfa yoksa) diğer kategoriye geç
-                if req.status_code == 404: 
-                    break 
+                if req.status_code == 404: break 
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
-                
-                if not film_listesi: 
-                    break
+                if not film_listesi: break
 
                 for li in film_listesi:
                     baslik_elem = li.select_one("span.film-title, h2.title, a.title")
                     baslik = baslik_elem.text.strip() if baslik_elem else ""
                     
-                    if not baslik or baslik in mevcut_basliklar: 
+                    if not baslik: continue
+                    
+                    # İŞTE BURASI: Eğer film zaten JSON dosyasında varsa, atladığını size bildirir!
+                    if baslik in mevcut_basliklar:
+                        print(f"  ⏩ Atlandı (Zaten veritabanında var): {baslik}")
                         continue 
 
                     link_elem = li.select_one("a")
@@ -165,14 +151,14 @@ def bot_calistir():
                         yeni_film_eklendi = True
                         
             except Exception as e:
-                pass # Hata verirse takılma, diğer sayfaya geç
+                pass
 
     if yeni_film_eklendi:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(veritabani, f, ensure_ascii=False, indent=4)
-        print("\n🎉 Veritabanı başarıyla güncellendi! Binlerce film kategorize edildi.")
+        print("\n🎉 Veritabanı başarıyla güncellendi!")
     else:
-        print("\nYeni film bulunamadı, sistem güncel.")
+        print("\nYeni film bulunamadı, sistem tamamen güncel.")
 
 if __name__ == "__main__":
     bot_calistir()
