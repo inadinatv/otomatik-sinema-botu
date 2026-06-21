@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIP Sinema Botu</title>
+    <!-- Harici sunucuların iframe'leri engellememesi için referer izni: -->
+    <meta name="referrer" content="no-referrer">
+    <style>
+        :root {
+            --bg-color: #141414;
+            --text-color: #fff;
+            --primary: #E50914; /* Netflix Kırmızısı */
+            --card-bg: #2f2f2f;
+        }
+        body { margin: 0; padding: 0; background-color: var(--bg-color); color: var(--text-color); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        header { background: #000; padding: 20px; text-align: center; font-size: 24px; font-weight: bold; border-bottom: 2px solid var(--primary); }
+        .nav-cats { display: flex; justify-content: center; gap: 15px; padding: 15px; flex-wrap: wrap; }
+        .nav-cats button { background: #333; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; transition: 0.3s; }
+        .nav-cats button:hover, .nav-cats button.active { background: var(--primary); }
+        
+        .movie-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; padding: 20px; max-width: 1200px; margin: auto; }
+        .movie-card { background: var(--card-bg); border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.3s; position: relative; }
+        .movie-card:hover { transform: scale(1.05); }
+        .movie-card img { width: 100%; height: 300px; object-fit: cover; }
+        .movie-info { padding: 10px; text-align: center; }
+        .movie-title { font-size: 16px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* MODAL TASARIMI (Tıklayınca Çıkan Detay Sayfası) */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-content { background: #181818; width: 90%; max-width: 800px; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; max-height: 90vh; }
+        .modal-header { display: flex; padding: 20px; gap: 20px; position: relative; }
+        .modal-header img { width: 150px; border-radius: 5px; }
+        .modal-details { flex: 1; }
+        .modal-title { font-size: 24px; color: var(--primary); margin-bottom: 10px; }
+        .modal-desc { font-size: 14px; color: #ccc; line-height: 1.5; max-height: 150px; overflow-y: auto; }
+        .close-btn { position: absolute; top: 15px; right: 20px; font-size: 30px; cursor: pointer; color: white; }
+        
+        .play-btn { background: var(--primary); color: white; border: none; padding: 12px 25px; font-size: 18px; border-radius: 5px; cursor: pointer; margin-top: 15px; font-weight: bold; display: inline-flex; align-items: center; gap: 10px;}
+        .play-btn:hover { background: #b20710; }
+        
+        .player-container { display: none; width: 100%; aspect-ratio: 16/9; background: #000; }
+        .player-container iframe { width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+
+    <header>VIP SİNEMA</header>
+    <div class="nav-cats" id="category-container">
+        <button class="active" onclick="filterCategory('Tümü')">Tümü</button>
+        <!-- Kategoriler JS ile buraya gelecek -->
+    </div>
+
+    <div class="movie-grid" id="movie-container">
+        <h2 style="grid-column: 1/-1; text-align:center;">Filmler Yükleniyor...</h2>
+    </div>
+
+    <!-- Film Detay Modalı -->
+    <div class="modal" id="movie-modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">×</span>
+            <div class="modal-header" id="modal-info">
+                <img id="modal-img" src="" alt="Afiş">
+                <div class="modal-details">
+                    <div class="modal-title" id="modal-title">Film Başlığı</div>
+                    <div class="modal-desc" id="modal-desc">Açıklama</div>
+                    <button class="play-btn" id="play-btn">▶ Filmi Oynat</button>
+                </div>
+            </div>
+            <div class="player-container" id="player-container">
+                <iframe id="video-player" allowfullscreen></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allMovies = [];
+
+        // 1. JSON Veritabanını Çek
+        fetch('veritabani.json')
+            .then(response => response.json())
+            .then(data => {
+                allMovies = data.filmler;
+                renderCategories(data.kategoriler);
+                renderMovies(allMovies);
+            })
+            .catch(err => {
+                document.getElementById('movie-container').innerHTML = '<h3 style="color:red;text-align:center;">Veritabanı Yüklenemedi! veritabani.json dosyasının dizinde olduğundan emin olun.</h3>';
+            });
+
+        // 2. Kategorileri Renderla
+        function renderCategories(cats) {
+            const container = document.getElementById('category-container');
+            cats.forEach(cat => {
+                const btn = document.createElement('button');
+                btn.innerText = cat;
+                btn.onclick = (e) => {
+                    document.querySelectorAll('.nav-cats button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    filterCategory(cat);
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        // 3. Filmleri Ekrana Bas
+        function renderMovies(movies) {
+            const container = document.getElementById('movie-container');
+            container.innerHTML = '';
+            movies.forEach(movie => {
+                const card = document.createElement('div');
+                card.className = 'movie-card';
+                card.onclick = () => openModal(movie);
+                card.innerHTML = `
+                    <img src="${movie.afis}" alt="${movie.baslik}" loading="lazy">
+                    <div class="movie-info">
+                        <div class="movie-title">${movie.baslik}</div>
+                        <small style="color:#aaa;">${movie.kategori}</small>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // 4. Kategori Filtreleme
+        function filterCategory(cat) {
+            if (cat === 'Tümü') renderMovies(allMovies);
+            else renderMovies(allMovies.filter(m => m.kategori === cat));
+        }
+
+        // 5. Modal İşlemleri
+        const modal = document.getElementById('movie-modal');
+        const playerContainer = document.getElementById('player-container');
+        const videoPlayer = document.getElementById('video-player');
+
+        function openModal(movie) {
+            document.getElementById('modal-img').src = movie.afis;
+            document.getElementById('modal-title').innerText = movie.baslik;
+            document.getElementById('modal-desc').innerText = movie.aciklama;
+            
+            // Oynat Butonuna Tıklanınca İframe'i Yükle
+            const playBtn = document.getElementById('play-btn');
+            playBtn.style.display = 'inline-flex';
+            playerContainer.style.display = 'none';
+            videoPlayer.src = ''; 
+            
+            playBtn.onclick = () => {
+                playBtn.style.display = 'none';
+                playerContainer.style.display = 'block';
+                videoPlayer.src = movie.iframe; // İframe Linkini Çalıştır
+            };
+
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            videoPlayer.src = ''; // Videoyu durdur
+            playerContainer.style.display = 'none';
+        }
+
+        // Boşluğa tıklayınca modalı kapat
+        window.onclick = function(event) {
+            if (event.target == modal) closeModal();
+        }
+    </script>
+</body>
+</html>
