@@ -5,7 +5,6 @@ on:
     - cron: '0 0,12 * * *'
   workflow_dispatch:
 
-# Botun dosyaları değiştirebilmesi için YAZMA YETKİSİ
 permissions:
   contents: write
 
@@ -16,10 +15,19 @@ jobs:
       - name: Kodu İndir
         uses: actions/checkout@v4
         with:
-          # GitHub yetki tokenini açıkça tanımlıyoruz
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Geçmişteki commit'lerle çakışmaması için tam derinlik
           fetch-depth: 0 
+
+      - name: Kamuflaj VPN Kurulumu (Cloudflare WARP)
+        run: |
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install cloudflare-warp -y
+          warp-cli --accept-tos registration new || warp-cli --accept-tos register
+          warp-cli --accept-tos mode proxy || warp-cli --accept-tos set-mode proxy
+          warp-cli --accept-tos connect
+          sleep 5
 
       - name: Python Kurulumu
         uses: actions/setup-python@v4
@@ -32,8 +40,6 @@ jobs:
       - name: Botu Çalıştır ve Filmleri Çek
         run: python bot.py
 
-      # Bu eklenti "Exit Code 128" hatasını tamamen çözer!
-      # Otomatik olarak dosyayı tanır, değişmişse GitHub'a ekler.
       - name: Yeni Verileri GitHub'a Kaydet
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
