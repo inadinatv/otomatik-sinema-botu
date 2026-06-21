@@ -9,32 +9,34 @@ from curl_cffi import requests
 BASE_URL = "https://www.fullhdfilmizlesene.life"
 DB_FILE = "veritabani.json"
 
-# Sizin tespit ettiğiniz ve resimdeki tüm kategorilerin KUSURSUZ tam listesi
+# HATANIN KAYNAĞI DÜZELTİLDİ: Sizin ilk verdiğiniz orijinal ve KUSURSUZ linkler geri getirildi.
 KATEGORILER = {
-    "Aile Filmleri": "/filmizle/aile-filmleri/",
-    "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri/",
-    "Animasyon Filmleri": "/filmizle/animasyon-filmleri/",
-    "Belgeseller": "/filmizle/belgeseller/",
-    "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri/",
-    "Blu Ray Filmler": "/filmizle/bluray-filmler/",
-    "Çizgi Filmler": "/filmizle/cizgi-filmler/",
-    "Dram Filmleri": "/filmizle/dram-filmleri/",
-    "Fantastik Filmler": "/filmizle/fantastik-filmler/",
-    "Gerilim Filmleri": "/filmizle/gerilim-filmleri/",
-    "Gizem Filmleri": "/filmizle/gizem-filmleri/",
-    "Hint Filmleri": "/filmizle/hint-filmleri/",
-    "Komedi Filmleri": "/filmizle/komedi-filmleri/",
-    "Korku Filmleri": "/filmizle/korku-filmleri/",
-    "Macera Filmleri": "/filmizle/macera-filmleri/",
-    "Müzikal Filmler": "/filmizle/muzikal-filmler/",
-    "Polisiye Filmleri": "/filmizle/polisiye-filmleri/",
-    "Psikolojik Filmler": "/filmizle/psikolojik-filmler/",
-    "Romantik Filmler": "/filmizle/romantik-filmler/",
-    "Savaş Filmleri": "/filmizle/savas-filmleri/",
-    "Suç Filmleri": "/filmizle/suc-filmleri/",
-    "Tarih Filmleri": "/filmizle/tarih-filmleri/",
-    "Western Filmler": "/filmizle/western-filmler/",
-    "Yerli Filmler": "/filmizle/yerli-filmler/"
+    "En Çok İzlenen Filmler": "/en-cok-izlenen-filmler-izle-hd/",
+    "IMDB Puanı Yüksek Filmler": "/filmizle/imdb-puani-yuksek-filmler-izle-1/",
+    "Aile Filmleri": "/filmizle/aile-filmleri-hdf-izle/",
+    "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri-hdf-izle/",
+    "Animasyon Filmleri": "/filmizle/animasyon-filmleri-fhd-izle/",
+    "Belgeseller": "/filmizle/belgesel-filmleri-izle/",
+    "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri-izle-2/",
+    "Blu Ray Filmler": "/filmizle/bluray-filmler-izle/",
+    "Çizgi Filmler": "/filmizle/cizgi-filmler-fhd-izle/",
+    "Dram Filmleri": "/filmizle/dram-filmleri-hd-izle/",
+    "Fantastik Filmler": "/filmizle/fantastik-filmler-hd-izle/",
+    "Gerilim Filmleri": "/filmizle/gerilim-filmleri-fhd-izle/",
+    "Gizem Filmleri": "/filmizle/gizem-filmleri-hd-izle/",
+    "Hint Filmleri": "/filmizle/hint-filmleri-fhd-izle/",
+    "Komedi Filmleri": "/filmizle/komedi-filmleri-fhd-izle/",
+    "Korku Filmleri": "/filmizle/korku-filmleri-izle-3/",
+    "Macera Filmleri": "/filmizle/macera-filmleri-fhd-izle/",
+    "Müzikal Filmler": "/filmizle/muzikal-filmler-izle/",
+    "Polisiye Filmleri": "/filmizle/polisiye-filmleri-izle/",
+    "Psikolojik Filmler": "/filmizle/psikolojik-filmler-izle/",
+    "Romantik Filmler": "/filmizle/romantik-filmler-fhd-izle/",
+    "Savaş Filmleri": "/filmizle/savas-filmleri-fhd-izle/",
+    "Suç Filmleri": "/filmizle/suc-filmleri-izle/",
+    "Tarih Filmleri": "/filmizle/tarih-filmleri-fhd-izle/",
+    "Western Filmler": "/filmizle/western-filmler-hd-izle-3/",
+    "Yerli Filmler": "/filmizle/yerli-filmler-hd-izle/"
 }
 
 PROXY = {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}
@@ -64,12 +66,26 @@ def extract_movie_data(film_url):
         soup = BeautifulSoup(req.text, 'html.parser')
         
         aciklama = ""
-        ozet_div = soup.select_one(".ozet, .summary, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
-        if ozet_div: aciklama = ozet_div.text.strip()
+        
+        # 1. YÖNTEM: Eksiksiz Sınıf Taraması (.film-content geri eklendi)
+        ozet_div = soup.select_one(".ozet, .summary, .film-content, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
+        if ozet_div: 
+            aciklama = ozet_div.text.strip()
+            
+        # 2. YÖNTEM: Div yoksa yazıyı direkt sayfa paragraflarının (p etiketlerinin) içinden söküp al!
+        if not aciklama or len(aciklama) < 10:
+            paragraphs = soup.select('article p, .post-content p')
+            if paragraphs:
+                aciklama = " ".join([p.text.strip() for p in paragraphs if len(p.text.strip()) > 15])
+                
+        # 3. YÖNTEM: Meta Etiketi (En son çare)
         if not aciklama or len(aciklama) < 10:
             meta_desc = soup.select_one('meta[name="description"]')
-            if meta_desc: aciklama = meta_desc.get("content", "").strip()
-        if not aciklama: aciklama = "Bu film için herhangi bir açıklama bulunamadı."
+            if meta_desc: 
+                aciklama = meta_desc.get("content", "").strip()
+                
+        if not aciklama: 
+            aciklama = "Bu film için açıklama bulunamadı."
 
         iframe_linki = None
         scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
@@ -102,48 +118,51 @@ def bot_calistir():
     
     for kategori_adi, url_yolu in KATEGORILER.items():
         print(f"\n>> Taraniyor: {kategori_adi}")
+        hedef_url = BASE_URL + url_yolu
         
-        # Film sayısını katlamak için her kategorinin ilk 2 sayfasını (veya 3) tarar!
-        for sayfa in range(1, 3): 
-            sayfa_eki = "" if sayfa == 1 else f"sayfa-{sayfa}/"
-            hedef_url = BASE_URL + url_yolu + sayfa_eki
+        try:
+            req = session.get(hedef_url, timeout=20)
+            if req.status_code != 200: 
+                print(f"  [!] HTTP Hatası: {req.status_code}")
+                continue
+
+            soup = BeautifulSoup(req.content, 'html.parser')
+            film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
             
-            try:
-                req = session.get(hedef_url, timeout=20)
-                if req.status_code != 200: continue
+            if not film_listesi: 
+                print("  [!] Bu kategoride film listesi bulunamadı.")
+                continue
 
-                soup = BeautifulSoup(req.content, 'html.parser')
-                film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
-                if not film_listesi: break # Sayfada film yoksa diğer sayfaya geçme
+            for li in film_listesi:
+                baslik_elem = li.select_one("span.film-title, h2.title, a.title")
+                baslik = baslik_elem.text.strip() if baslik_elem else ""
+                
+                # Zaten olan filmi atla
+                if not baslik or baslik in mevcut_basliklar: continue 
 
-                for li in film_listesi:
-                    baslik_elem = li.select_one("span.film-title, h2.title, a.title")
-                    baslik = baslik_elem.text.strip() if baslik_elem else ""
-                    if not baslik or baslik in mevcut_basliklar: continue 
-
-                    link_elem = li.select_one("a")
-                    film_url = link_elem.get("href") if link_elem else ""
-                    if not film_url.startswith("http"): film_url = BASE_URL + film_url
-                    
-                    img = li.select_one("img")
-                    afis = img.get("data-src") or img.get("src") or "" if img else ""
-                    
-                    print(f"  🎬 Yeni Film: {baslik}")
-                    detay = extract_movie_data(film_url)
-                    
-                    if detay["iframe"]:
-                        veritabani["filmler"].insert(0, {
-                            "id": len(veritabani["filmler"]) + 1,
-                            "baslik": baslik,
-                            "kategori": kategori_adi,
-                            "afis": afis,
-                            "aciklama": detay["aciklama"],
-                            "iframe": detay["iframe"]
-                        })
-                        mevcut_basliklar.append(baslik)
-                        yeni_film_eklendi = True
-            except Exception as e:
-                pass
+                link_elem = li.select_one("a")
+                film_url = link_elem.get("href") if link_elem else ""
+                if not film_url.startswith("http"): film_url = BASE_URL + film_url
+                
+                img = li.select_one("img")
+                afis = img.get("data-src") or img.get("src") or "" if img else ""
+                
+                print(f"  🎬 Yeni Film: {baslik}")
+                detay = extract_movie_data(film_url)
+                
+                if detay["iframe"]:
+                    veritabani["filmler"].insert(0, {
+                        "id": len(veritabani["filmler"]) + 1,
+                        "baslik": baslik,
+                        "kategori": kategori_adi,
+                        "afis": afis,
+                        "aciklama": detay["aciklama"], # Artık boş dönmeyecek!
+                        "iframe": detay["iframe"]
+                    })
+                    mevcut_basliklar.append(baslik)
+                    yeni_film_eklendi = True
+        except Exception as e:
+            print(f"  [!] Hata: {e}")
 
     if yeni_film_eklendi:
         with open(DB_FILE, "w", encoding="utf-8") as f:
