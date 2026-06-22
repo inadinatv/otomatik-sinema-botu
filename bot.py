@@ -106,36 +106,20 @@ def bot_calistir():
         print(f"\n>> 📂 Kategori: {kategori_adi} | DEVASA ARŞİV TARAMASI BAŞLADI")
         
         sayfa = 1
+        hedef_url = BASE_URL + url_yolu
+        
         while True:
-            # URL SAYFALAMA MANTIĞI - 3 Farklı Varyasyon Denenir
-            if sayfa == 1:
-                hedef_url = BASE_URL + url_yolu
-            else:
-                hedef_url = BASE_URL + url_yolu + f"page/{sayfa}/"
-                
             try:
                 req = session.get(hedef_url, timeout=20)
-                
-                # Eğer /page/2/ çalışmazsa, /sayfa-2/ formatını dene
-                if req.status_code == 404 and sayfa > 1:
-                    hedef_url = BASE_URL + url_yolu + f"sayfa-{sayfa}/"
-                    req = session.get(hedef_url, timeout=20)
-                    
-                # Eğer o da çalışmazsa /sayfa/2/ formatını dene
-                if req.status_code == 404 and sayfa > 1:
-                    hedef_url = BASE_URL + url_yolu + f"sayfa/{sayfa}/"
-                    req = session.get(hedef_url, timeout=20)
-
-                # Hiçbiri çalışmazsa demek ki sitenin o kategorisinin gerçekten sonuna gelmişizdir.
                 if req.status_code == 404: 
-                    print(f"  🏁 Sayfa {sayfa} bulunamadı. Bu kategorideki TÜM FİLMLER çekildi!")
+                    print(f"  🏁 Sayfa {sayfa} boş çıktı. Bu kategorinin tüm filmleri başarıyla çekildi!")
                     break
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
                 
                 if not film_listesi: 
-                    print("  🏁 Bu sayfada film kalmadı, kategori tamamlandı.")
+                    print("  🏁 Bu sayfada listelenecek film kalmadı, kategori tamamlandı.")
                     break
 
                 print(f"\n  ================ SAYFA {sayfa} İÇİNE GİRİLDİ ================")
@@ -171,12 +155,58 @@ def bot_calistir():
                         mevcut_basliklar.append(baslik)
                         yeni_film_eklendi = True
                         
+                # --- AKILLI BUTON AVCISI (DYNAMIC PAGINATION) ---
+                sayfa += 1
+                next_url = None
+                
+                # Sitenin en altındaki "Sonraki Sayfa" tuşunu bizzat arar (Sınıf isimleriyle)
+                next_tag = soup.find('a', rel='next') or soup.select_one('.pagination a.next, .sayfalama a.next, .nav-links a.next, a.next-page, a.ileri, a.sonraki, a.nextpostslink')
+                
+                # Eğer özel bir sınıf yoksa, rakamlara bakarak bulur (Örn: "2", "3")
+                if not next_tag:
+                    for a in soup.select('.pagination a, .sayfalama a, .pages a, .nav-links a'):
+                        if a.text.strip() == str(sayfa) or "Sonraki" in a.text or ">" in a.text:
+                            next_tag = a
+                            break
+                            
+                # Eğer butonu başarıyla bulduysa o gizli linki alıp döngüye devam eder
+                if next_tag and next_tag.get('href') and len(next_tag.get('href')) > 5:
+                    next_url = next_tag.get('href')
+                    if not next_url.startswith('http'):
+                        next_url = BASE_URL + next_url if next_url.startswith('/') else BASE_URL + "/" + next_url
+                    
+                    hedef_url = next_url
+                    print(f"  🔗 [Akıllı Sistem] Sonraki sayfa linki bulundu, yola devam ediliyor...")
+                    continue
+                    
+                # Eğer sitede buton okunamazsa ZORLA TAHMİN ET:
+                olasi_linkler = [
+                    BASE_URL + url_yolu + f"sayfa-{sayfa}/",
+                    BASE_URL + url_yolu + f"page/{sayfa}/",
+                    BASE_URL + url_yolu + f"sayfa/{sayfa}/",
+                    BASE_URL + url_yolu + f"{sayfa}/",
+                    BASE_URL + url_yolu.rstrip('/') + f"-sayfa-{sayfa}/",
+                    BASE_URL + url_yolu + f"?page={sayfa}"
+                ]
+                
+                sayfa_bulundu = False
+                for link in olasi_linkler:
+                    req_test = session.get(link, timeout=15)
+                    if req_test.status_code == 200:
+                        test_soup = BeautifulSoup(req_test.content, 'html.parser')
+                        if test_soup.select("li.film, div.movie-item, article.film, .movie-list li"):
+                            hedef_url = link
+                            sayfa_bulundu = True
+                            print(f"  🔗 [Tahmin Sistemi] Sonraki sayfa adresi kırıldı, yola devam ediliyor...")
+                            break
+                            
+                if not sayfa_bulundu:
+                    print(f"  🏁 Bu kategoride başka sayfa kalmadı veya bitti. Sıradaki kategoriye geçiliyor.")
+                    break
+
             except Exception as e:
-                print(f"  [!] Hata oluştu, diğer sayfaya geçiliyor: {e}")
+                print(f"  [!] Beklenmeyen hata oluştu, diğer kategoriye geçiliyor: {e}")
                 break
-            
-            # Sayfadaki 20 film bitti, şimdi BİR SONRAKİ SAYFAYA GEÇ (Sonsuz Döngü)
-            sayfa += 1 
 
     if yeni_film_eklendi:
         with open(DB_FILE, "w", encoding="utf-8") as f:
