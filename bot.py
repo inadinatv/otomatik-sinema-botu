@@ -103,24 +103,42 @@ def bot_calistir():
     yeni_film_eklendi = False
     
     for kategori_adi, url_yolu in KATEGORILER.items():
-        print(f"\n>> Taraniyor: {kategori_adi}")
+        print(f"\n>> 📂 Kategori: {kategori_adi} | DEVASA ARŞİV TARAMASI BAŞLADI")
         
         sayfa = 1
-        # SINIRSIZ DÖNGÜ (Sayfalar bitene kadar devam eder)
         while True:
-            hedef_url = BASE_URL + url_yolu if sayfa == 1 else BASE_URL + url_yolu + f"sayfa-{sayfa}/"
+            # URL SAYFALAMA MANTIĞI - 3 Farklı Varyasyon Denenir
+            if sayfa == 1:
+                hedef_url = BASE_URL + url_yolu
+            else:
+                hedef_url = BASE_URL + url_yolu + f"page/{sayfa}/"
                 
             try:
                 req = session.get(hedef_url, timeout=20)
+                
+                # Eğer /page/2/ çalışmazsa, /sayfa-2/ formatını dene
+                if req.status_code == 404 and sayfa > 1:
+                    hedef_url = BASE_URL + url_yolu + f"sayfa-{sayfa}/"
+                    req = session.get(hedef_url, timeout=20)
+                    
+                # Eğer o da çalışmazsa /sayfa/2/ formatını dene
+                if req.status_code == 404 and sayfa > 1:
+                    hedef_url = BASE_URL + url_yolu + f"sayfa/{sayfa}/"
+                    req = session.get(hedef_url, timeout=20)
+
+                # Hiçbiri çalışmazsa demek ki sitenin o kategorisinin gerçekten sonuna gelmişizdir.
                 if req.status_code == 404: 
-                    break # Kategori bitti, sayfalar tükendi!
+                    print(f"  🏁 Sayfa {sayfa} bulunamadı. Bu kategorideki TÜM FİLMLER çekildi!")
+                    break
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
                 
                 if not film_listesi: 
-                    break # Sayfada listelenecek film kalmadı
+                    print("  🏁 Bu sayfada film kalmadı, kategori tamamlandı.")
+                    break
 
+                print(f"\n  ================ SAYFA {sayfa} İÇİNE GİRİLDİ ================")
                 for li in film_listesi:
                     baslik_elem = li.select_one("span.film-title, h2.title, a.title")
                     baslik = baslik_elem.text.strip() if baslik_elem else ""
@@ -128,7 +146,7 @@ def bot_calistir():
                     if not baslik: continue
                     
                     if baslik in mevcut_basliklar:
-                        print(f"  ⏩ Atlandı (Zaten veritabanında var): {baslik}")
+                        print(f"  ⏩ Atlandı (Daha önce kaydedilmiş): {baslik}")
                         continue 
 
                     link_elem = li.select_one("a")
@@ -138,7 +156,7 @@ def bot_calistir():
                     img = li.select_one("img")
                     afis = img.get("data-src") or img.get("src") or "" if img else ""
                     
-                    print(f"  🎬 Kategoriye Eklendi [{kategori_adi} - Sayfa {sayfa}]: {baslik}")
+                    print(f"  📥 ARŞİVE EKLENİYOR: {baslik}")
                     detay = extract_movie_data(film_url)
                     
                     if detay["iframe"]:
@@ -154,16 +172,18 @@ def bot_calistir():
                         yeni_film_eklendi = True
                         
             except Exception as e:
-                pass
+                print(f"  [!] Hata oluştu, diğer sayfaya geçiliyor: {e}")
+                break
             
-            sayfa += 1 # Sonraki sayfaya geç
+            # Sayfadaki 20 film bitti, şimdi BİR SONRAKİ SAYFAYA GEÇ (Sonsuz Döngü)
+            sayfa += 1 
 
     if yeni_film_eklendi:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(veritabani, f, ensure_ascii=False, indent=4)
-        print("\n🎉 Veritabanı başarıyla güncellendi! Sitedeki TÜM FİLMLER tarandı.")
+        print("\n🎉 MÜJDE! Devasa arşiv başarıyla veritabanına kaydedildi.")
     else:
-        print("\nYeni film bulunamadı, sistem tamamen güncel.")
+        print("\n✅ Sistem tamamen güncel, sitedeki tüm arşiv zaten bizde var.")
 
 if __name__ == "__main__":
     bot_calistir()
