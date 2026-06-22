@@ -13,7 +13,7 @@ KATEGORILER = {
     "Aile Filmleri": "/filmizle/aile-filmleri/",
     "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri/",
     "Animasyon Filmleri": "/filmizle/animasyon-filmleri/",
-    "Belgeseller": "/filmizle/belgesel-filmleri/",
+    "Belgeseller": "/filmizle/belgeseller/",
     "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri/",
     "Blu Ray Filmler": "/filmizle/bluray-filmler/",
     "Çizgi Filmler": "/filmizle/cizgi-filmler/",
@@ -105,19 +105,21 @@ def bot_calistir():
     for kategori_adi, url_yolu in KATEGORILER.items():
         print(f"\n>> Taraniyor: {kategori_adi}")
         
-        # Sayfalama limitini 3'ten 30'a çıkardık
-        for sayfa in range(1, 31): 
+        sayfa = 1
+        # SINIRSIZ DÖNGÜ (Sayfalar bitene kadar devam eder)
+        while True:
             hedef_url = BASE_URL + url_yolu if sayfa == 1 else BASE_URL + url_yolu + f"sayfa-{sayfa}/"
                 
             try:
                 req = session.get(hedef_url, timeout=20)
-                if req.status_code == 404: break 
+                if req.status_code == 404: 
+                    break # Kategori bitti, sayfalar tükendi!
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
                 
-                # Eğer sayfada film yoksa döngüyü kır (Kategorinin sonuna gelindi)
-                if not film_listesi: break
+                if not film_listesi: 
+                    break # Sayfada listelenecek film kalmadı
 
                 for li in film_listesi:
                     baslik_elem = li.select_one("span.film-title, h2.title, a.title")
@@ -153,11 +155,13 @@ def bot_calistir():
                         
             except Exception as e:
                 pass
+            
+            sayfa += 1 # Sonraki sayfaya geç
 
     if yeni_film_eklendi:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(veritabani, f, ensure_ascii=False, indent=4)
-        print("\n🎉 Veritabanı başarıyla güncellendi!")
+        print("\n🎉 Veritabanı başarıyla güncellendi! Sitedeki TÜM FİLMLER tarandı.")
     else:
         print("\nYeni film bulunamadı, sistem tamamen güncel.")
 
