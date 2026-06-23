@@ -3,11 +3,20 @@ import os
 import re
 import base64
 import codecs
+import time
+import random
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
+# ==========================================
+# ⚙️ SİSTEM AYARLARI
+# ==========================================
 BASE_URL = "https://www.fullhdfilmizlesene.life"
 DB_FILE = "veritabani.json"
+
+# Telegram Bildirim Ayarları (Sizin bilgileriniz entegre edildi)
+TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
+TELEGRAM_CHAT_ID = "666941331"
 
 KATEGORILER = {
     "Aile Filmleri": "/filmizle/aile-filmleri/",
@@ -43,6 +52,27 @@ session.headers.update({
     "Accept-Language": "tr-TR,tr;q=0.9",
     "Referer": "https://www.google.com/"
 })
+
+# ==========================================
+# 🤖 YAPAY ZEKA VE YARDIMCI FONKSİYONLAR
+# ==========================================
+
+def telegram_mesaj_gonder(mesaj):
+    """Tarama bittiğinde sahibine Telegram'dan rapor verir."""
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "HTML"}
+            session.post(url, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Telegram mesajı gönderilemedi: {e}")
+
+def baslik_temizle(baslik):
+    """Filmlerin yanındaki çirkin 'İzle', 'Full HD' gibi etiketleri temizler."""
+    silinecek_kelimeler = [" Türkçe Dublaj İzle", " Türkçe Dublaj", " Full HD İzle", " HD İzle", " 1080p İzle", " Altyazılı İzle", " izle"]
+    for kelime in silinecek_kelimeler:
+        baslik = re.sub(kelime, "", baslik, flags=re.IGNORECASE)
+    return baslik.strip()
 
 def decode_iframe(s):
     if not isinstance(s, str) or len(s) < 10: return None
@@ -94,44 +124,60 @@ def extract_movie_data(film_url):
     except:
         return {"aciklama": "Veri alınamadı.", "iframe": None}
 
+# ==========================================
+# 🚀 ANA ÇALIŞMA MOTORU
+# ==========================================
+
 def bot_calistir():
     if os.path.exists(DB_FILE):
         with open(DB_FILE, "r", encoding="utf-8") as f: veritabani = json.load(f)
     else: veritabani = {"kategoriler": list(KATEGORILER.keys()), "filmler": []}
 
     mevcut_basliklar = [film["baslik"] for film in veritabani.get("filmler", [])]
-    yeni_film_eklendi = False
+    
+    # Canlı İstatistik Değişkenleri
+    genel_toplam_yeni_film = 0 
+    
+    print("\n" + "="*50)
+    print("🚀 İNADINA TV - DERİN KAZICI BOT BAŞLATILDI")
+    print("="*50)
     
     for kategori_adi, url_yolu in KATEGORILER.items():
-        print(f"\n>> 📂 Kategori: {kategori_adi} | DEVASA ARŞİV TARAMASI BAŞLADI")
+        kategori_yeni_film_sayisi = 0
+        print(f"\n📁 [KATEGORİ BAŞLADI]: {kategori_adi} taranıyor...")
         
         sayfa = 1
         hedef_url = BASE_URL + url_yolu
         
         while True:
             try:
+                # Anti-Ban Koruması: Sayfalar arası ufak insanımsı bekleme (0.5 sn - 1.5 sn)
+                if sayfa > 1: time.sleep(random.uniform(0.5, 1.5))
+                
                 req = session.get(hedef_url, timeout=20)
                 if req.status_code == 404: 
-                    print(f"  🏁 Sayfa {sayfa} boş çıktı. Bu kategorinin tüm filmleri başarıyla çekildi!")
                     break
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
                 
                 if not film_listesi: 
-                    print("  🏁 Bu sayfada listelenecek film kalmadı, kategori tamamlandı.")
                     break
 
-                print(f"\n  ================ SAYFA {sayfa} İÇİNE GİRİLDİ ================")
+                sayfadaki_film_sayisi = len(film_listesi)
+                print(f"  📄 Sayfa {sayfa} taranıyor... (Bulunan film sayısı: {sayfadaki_film_sayisi})")
+                
                 for li in film_listesi:
                     baslik_elem = li.select_one("span.film-title, h2.title, a.title")
-                    baslik = baslik_elem.text.strip() if baslik_elem else ""
+                    ham_baslik = baslik_elem.text.strip() if baslik_elem else ""
                     
-                    if not baslik: continue
+                    if not ham_baslik: continue
+                    
+                    # Başlığı gereksiz takılardan temizle
+                    baslik = baslik_temizle(ham_baslik)
                     
                     if baslik in mevcut_basliklar:
-                        print(f"  ⏩ Atlandı (Daha önce kaydedilmiş): {baslik}")
-                        continue 
+                        continue # Terminal kalabalıklaşmasın diye atlananları gizledik, sadece sayı tutuluyor.
 
                     link_elem = li.select_one("a")
                     film_url = link_elem.get("href") if link_elem else ""
@@ -140,7 +186,7 @@ def bot_calistir():
                     img = li.select_one("img")
                     afis = img.get("data-src") or img.get("src") or "" if img else ""
                     
-                    print(f"  📥 ARŞİVE EKLENİYOR: {baslik}")
+                    print(f"    ✅ Arşive Eklendi: {baslik}")
                     detay = extract_movie_data(film_url)
                     
                     if detay["iframe"]:
@@ -153,67 +199,69 @@ def bot_calistir():
                             "iframe": detay["iframe"]
                         })
                         mevcut_basliklar.append(baslik)
-                        yeni_film_eklendi = True
+                        kategori_yeni_film_sayisi += 1
+                        genel_toplam_yeni_film += 1
                         
-                # --- AKILLI BUTON AVCISI (DYNAMIC PAGINATION) ---
+                # Akıllı Buton Avcısı (Sonraki Sayfa)
                 sayfa += 1
-                next_url = None
-                
-                # Sitenin en altındaki "Sonraki Sayfa" tuşunu bizzat arar (Sınıf isimleriyle)
                 next_tag = soup.find('a', rel='next') or soup.select_one('.pagination a.next, .sayfalama a.next, .nav-links a.next, a.next-page, a.ileri, a.sonraki, a.nextpostslink')
-                
-                # Eğer özel bir sınıf yoksa, rakamlara bakarak bulur (Örn: "2", "3")
                 if not next_tag:
                     for a in soup.select('.pagination a, .sayfalama a, .pages a, .nav-links a'):
                         if a.text.strip() == str(sayfa) or "Sonraki" in a.text or ">" in a.text:
                             next_tag = a
                             break
                             
-                # Eğer butonu başarıyla bulduysa o gizli linki alıp döngüye devam eder
                 if next_tag and next_tag.get('href') and len(next_tag.get('href')) > 5:
                     next_url = next_tag.get('href')
-                    if not next_url.startswith('http'):
-                        next_url = BASE_URL + next_url if next_url.startswith('/') else BASE_URL + "/" + next_url
-                    
-                    hedef_url = next_url
-                    print(f"  🔗 [Akıllı Sistem] Sonraki sayfa linki bulundu, yola devam ediliyor...")
+                    hedef_url = next_url if next_url.startswith('http') else (BASE_URL + next_url if next_url.startswith('/') else BASE_URL + "/" + next_url)
                     continue
                     
-                # Eğer sitede buton okunamazsa ZORLA TAHMİN ET:
+                # Zorla Tahmin
                 olasi_linkler = [
                     BASE_URL + url_yolu + f"sayfa-{sayfa}/",
                     BASE_URL + url_yolu + f"page/{sayfa}/",
-                    BASE_URL + url_yolu + f"sayfa/{sayfa}/",
-                    BASE_URL + url_yolu + f"{sayfa}/",
-                    BASE_URL + url_yolu.rstrip('/') + f"-sayfa-{sayfa}/",
-                    BASE_URL + url_yolu + f"?page={sayfa}"
+                    BASE_URL + url_yolu + f"sayfa/{sayfa}/"
                 ]
-                
                 sayfa_bulundu = False
                 for link in olasi_linkler:
                     req_test = session.get(link, timeout=15)
-                    if req_test.status_code == 200:
-                        test_soup = BeautifulSoup(req_test.content, 'html.parser')
-                        if test_soup.select("li.film, div.movie-item, article.film, .movie-list li"):
-                            hedef_url = link
-                            sayfa_bulundu = True
-                            print(f"  🔗 [Tahmin Sistemi] Sonraki sayfa adresi kırıldı, yola devam ediliyor...")
-                            break
+                    if req_test.status_code == 200 and BeautifulSoup(req_test.content, 'html.parser').select("li.film, div.movie-item, article.film"):
+                        hedef_url = link
+                        sayfa_bulundu = True
+                        break
                             
                 if not sayfa_bulundu:
-                    print(f"  🏁 Bu kategoride başka sayfa kalmadı veya bitti. Sıradaki kategoriye geçiliyor.")
                     break
 
             except Exception as e:
-                print(f"  [!] Beklenmeyen hata oluştu, diğer kategoriye geçiliyor: {e}")
+                print(f"  [!] Hata: {e}")
                 break
+                
+        # Kategori Sonu Raporu
+        print(f"✅ {kategori_adi} tamamlandı! Bu kategoriden toplam {kategori_yeni_film_sayisi} YENİ FİLM çekildi.")
 
-    if yeni_film_eklendi:
+    # ==========================================
+    # 📊 BİTİŞ VE RAPORLAMA EKRANI
+    # ==========================================
+    toplam_arsiv_sayisi = len(veritabani["filmler"])
+    
+    print("\n" + "="*50)
+    print("🏁 TARAMA İŞLEMİ SONA ERDİ")
+    print(f"🌟 Bu Turda Eklenen Yeni Film: {genel_toplam_yeni_film}")
+    print(f"📚 Veritabanındaki Toplam Film: {toplam_arsiv_sayisi}")
+    print("="*50)
+
+    if genel_toplam_yeni_film > 0:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(veritabani, f, ensure_ascii=False, indent=4)
-        print("\n🎉 MÜJDE! Devasa arşiv başarıyla veritabanına kaydedildi.")
+        
+        # Telegram'a Başarı Mesajı At
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Yeni Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {toplam_arsiv_sayisi}\n\nVercel siteniz otomatik olarak güncellendi! 🚀"
+        telegram_mesaj_gonder(tg_mesaj)
     else:
-        print("\n✅ Sistem tamamen güncel, sitedeki tüm arşiv zaten bizde var.")
+        # Hiç film bulunmadıysa bile bilgi versin
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\nℹ️ <b>Sistem Zaten Güncel!</b>\nSitede çekilecek yeni film kalmadı.\n📚 <b>Arşivdeki Toplam Film:</b> {toplam_arsiv_sayisi}"
+        telegram_mesaj_gonder(tg_mesaj)
 
 if __name__ == "__main__":
     bot_calistir()
