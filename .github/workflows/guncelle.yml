@@ -40,8 +40,15 @@ jobs:
       - name: Botu Çalıştır ve Filmleri Çek
         run: python bot.py
 
+      # Çakışma Önleyici: Push işleminden önce Github'daki son hali çeker.
+      - name: Çakışmaları Önle
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || true
+
       - name: Yeni Verileri GitHub'a Kaydet
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🤖 Otomatik Güncelleme: Yeni filmler eklendi"
+          commit_message: "🤖 Otomatik Güncelleme: 9000+ Film Arşivi Eklendi"
           file_pattern: veritabani.json
