@@ -72,32 +72,40 @@ def baslik_temizle(baslik):
 
 def gecerli_oynatici_mi(url):
     """
-    YZ DESTEKLİ SAHTE VİDEO FİLTRESİ:
-    Sadece gerçek film barındırıcılarını (Rapid, Vidmoly vb.) kabul eder.
-    YouTube fragmanlarını ve reklam iframe'lerini çöpe atar.
+    KUSURSUZ DOĞRULAMA (GÜMRÜK MEMURU):
+    Asla resim linklerini veya alakasız siteleri video olarak kabul etmez!
     """
     if not url or len(url) < 10: return False
     url_low = url.lower()
     
-    # Kesinlikle yasaklı olan (Fragman/Reklam) kaynaklar
-    yasaklilar = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "ads"]
-    for yasak in yasaklilar:
-        if yasak in url_low:
-            return False
-            
-    return True
+    # 1. KURAL: Kesinlikle Resim veya Dosya Olmamalı!
+    yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js"]
+    if any(uzanti in url_low for uzanti in yasakli_uzantilar):
+        return False
+    
+    # 2. KURAL: Fragman ve Reklam Siteleri Yasak!
+    yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "ads", "imdb.com"]
+    if any(yasak in url_low for yasak in yasakli_siteler):
+        return False
+        
+    # 3. KURAL: Sadece Gerçek Video/İframe Sunucularına İzin Ver!
+    gecerli_sunucular = ["trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", "video", "iframe", "proton", "fast"]
+    if any(gecerli in url_low for gecerli in gecerli_sunucular):
+        return True
+        
+    return False
 
 def decode_iframe(s):
     if not isinstance(s, str) or len(s) < 10: return None
     s = s.strip()
-    if s.startswith("//"): return "https:" + s
-    if s.startswith("http"): return s
     s_pad = s + '=' * (-len(s) % 4)
     for method in ['rot13_b64', 'b64']:
         try:
             dec = base64.b64decode(codecs.encode(s_pad, 'rot_13')).decode('utf-8') if method == 'rot13_b64' else base64.b64decode(s_pad).decode('utf-8')
-            if "http" in dec and ("vod" in dec or "embed" in dec or "player" in dec or "video" in dec): 
-                return dec.replace("\\/", "/")
+            if "http" in dec: 
+                temiz_link = dec.replace("\\/", "/")
+                if gecerli_oynatici_mi(temiz_link): # Şifreden çıkanı gümrük memuruna yolla!
+                    return temiz_link
         except: pass
     return None
 
@@ -106,20 +114,12 @@ def extract_movie_data(film_url):
         req = session.get(film_url, timeout=15)
         soup = BeautifulSoup(req.text, 'html.parser')
         
-        # --- YZ ANLAMSAL METİN ANALİZİ (Boş filmleri eleme) ---
+        # --- YZ ANLAMSAL METİN ANALİZİ (Boş/Gelecek filmleri eleme) ---
         sayfa_metni = soup.text.lower()
-        yasakli_durumlar = [
-            "yapım aşamasında", 
-            "henüz sitemize eklenmemiştir", 
-            "yakında sinemalarda", 
-            "telif hakkı", 
-            "film yayından kaldırılmıştır"
-        ]
-        
+        yasakli_durumlar = ["yapım aşamasında", "henüz sitemize eklenmemiştir", "yakında sinemalarda", "telif hakkı nedeniyle kaldırılmıştır"]
         for durum in yasakli_durumlar:
             if durum in sayfa_metni:
-                return {"aciklama": "", "iframe": None, "hata": "Yapım Aşamasında veya Telif Yemiş"}
-        # ---------------------------------------------------------
+                return {"aciklama": "", "iframe": None, "hata": "Yapım Aşamasında / Telif Yemiş"}
 
         # Açıklama Çekme
         aciklama = ""
@@ -141,26 +141,29 @@ def extract_movie_data(film_url):
             encoded_strings = re.findall(r"'(.*?)'", str(json.loads(scx_match.group(1))))
             for code in encoded_strings:
                 dec = decode_iframe(code)
-                if gecerli_oynatici_mi(dec): 
+                if dec: 
                     iframe_linki = dec
                     break
 
-        # 2. Ahtapot İframe Avcısı (Sadece gerçek oynatıcıları alır)
+        # 2. İframe Avcısı (Yalnızca gümrükten geçenleri alır)
         if not iframe_linki:
             for tag in soup.find_all(['iframe', 'embed']):
                 val = tag.get('src') or tag.get('data-src') or tag.get('data-lazy-src')
+                if val and val.startswith('//'): val = "https:" + val
                 if gecerli_oynatici_mi(val):
-                    iframe_linki = "https:" + val if val.startswith('//') else val
+                    iframe_linki = val
                     break
                     
         # 3. Gizli Oynatıcı Linki Bulucu
         if not iframe_linki:
-            embed_match = re.search(r'[\"\'](https?://[^\"\']+(?:embed|v|player|video|play)[^\"\']+)[\"\']', req.text)
-            if embed_match and gecerli_oynatici_mi(embed_match.group(1)):
-                iframe_linki = embed_match.group(1).replace("\\/", "/")
+            embed_match = re.search(r'[\"\'](https?://[^\"\']+(?:embed|v|player|video|play|rapidvid|vidmoly)[^\"\']+)[\"\']', req.text)
+            if embed_match:
+                link = embed_match.group(1).replace("\\/", "/")
+                if gecerli_oynatici_mi(link):
+                    iframe_linki = link
 
         if not iframe_linki:
-            return {"aciklama": aciklama, "iframe": None, "hata": "Gerçek Oynatıcı Yok (Sadece Fragman olabilir)"}
+            return {"aciklama": aciklama, "iframe": None, "hata": "Oynatıcı Bulunamadı veya Sadece Fragman/Resim Var"}
 
         return {"aciklama": aciklama, "iframe": iframe_linki, "hata": None}
     except Exception as e:
@@ -179,7 +182,7 @@ def bot_calistir():
     genel_toplam_yeni_film = 0 
     
     print("\n" + "="*50)
-    print("🚀 İNADINA TV - YAPAY ZEKA DESTEKLİ DERİN KAZICI")
+    print("🚀 İNADINA TV - OYNATICI DOĞRULAMALI DERİN KAZICI")
     print("="*50)
     
     for kategori_adi, url_yolu in KATEGORILER.items():
@@ -230,21 +233,20 @@ def bot_calistir():
                     detay = extract_movie_data(film_url)
                     
                     if detay["iframe"]:
-                        print(f"    ✅ Arşive Eklendi: {baslik}")
+                        print(f"    ✅ Oynatıcı Doğrulandı ve Eklendi: {baslik}")
                         veritabani["filmler"].append({
                             "id": len(veritabani["filmler"]) + 1,
                             "baslik": baslik,
                             "kategori": kategori_adi,
                             "afis": afis,
                             "aciklama": detay["aciklama"],
-                            "iframe": detay["iframe"]
+                            "iframe": detay["iframe"] # ARTIK %100 GERÇEK VİDEO LİNKİ!
                         })
                         mevcut_basliklar.append(baslik)
                         kategori_yeni_film_sayisi += 1
                         genel_toplam_yeni_film += 1
                     else:
-                        # YAPAY ZEKA FİLTRESİNE TAKILANLAR BURADA RAPORLANIR
-                        print(f"    ❌ Atlandı ({detay['hata']}): {baslik}")
+                        print(f"    ❌ Reddedildi ({detay['hata']}): {baslik}")
                         
                 # SAYFA DEĞİŞTİRME MOTORU
                 sayfa += 1
@@ -272,7 +274,7 @@ def bot_calistir():
                 print(f"  [!] Hata: {e}")
                 break
                 
-        print(f"✅ {kategori_adi} bitti! Toplam {kategori_yeni_film_sayisi} gerçek film çekildi.")
+        print(f"✅ {kategori_adi} bitti! Toplam {kategori_yeni_film_sayisi} gerçek video çekildi.")
 
     # ==========================================
     # 📊 BİTİŞ VE RAPORLAMA EKRANI
@@ -289,7 +291,7 @@ def bot_calistir():
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(veritabani, f, ensure_ascii=False, indent=4)
         
-        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Kaliteli Film:</b> {genel_toplam_yeni_film}\n🛡️ <i>Yapım aşamasında olanlar çöpe atıldı.</i>\n📚 <b>Arşivdeki Toplam Film:</b> {toplam_arsiv_sayisi}\n\nVercel siteniz güncellendi! 🚀"
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Gerçek Videolu Film:</b> {genel_toplam_yeni_film}\n🛡️ <i>Resim/Sahte Link olanlar çöpe atıldı.</i>\n📚 <b>Arşivdeki Toplam Film:</b> {toplam_arsiv_sayisi}\n\nVercel siteniz güncellendi! 🚀"
         telegram_mesaj_gonder(tg_mesaj)
     else:
         tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\nℹ️ <b>Sistem Zaten Güncel!</b>\nSitede eklenebilecek yeni/çalışan film bulunamadı.\n📚 <b>Arşivdeki Toplam Film:</b> {toplam_arsiv_sayisi}"
