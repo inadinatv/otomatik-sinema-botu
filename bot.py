@@ -1,338 +1,243 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>İnadına TV 2 | Akıllı Sinema</title>
-    <meta name="referrer" content="no-referrer">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-dark: #070707;
-            --bg-card: #121212;
-            --primary: #d60000;
-            --text-main: #ffffff;
-            --text-muted: #888888;
-        }
+import json
+import os
+import re
+import base64
+import codecs
+import time
+import random
+from bs4 import BeautifulSoup
+from curl_cffi import requests
+
+# ==========================================
+# ⚙️ SİSTEM AYARLARI
+# ==========================================
+BASE_URL = "https://www.fullhdfilmizlesene.life"
+DB_FILE = "veritabani.json"
+
+TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
+TELEGRAM_CHAT_ID = "666941331"
+
+KATEGORILER = {
+    "Aile Filmleri": "/filmizle/aile-filmleri/",
+    "Aksiyon Filmleri": "/filmizle/aksiyon-filmleri/",
+    "Animasyon Filmleri": "/filmizle/animasyon-filmleri/",
+    "Belgeseller": "/filmizle/belgeseller/",
+    "Bilim Kurgu Filmleri": "/filmizle/bilim-kurgu-filmleri/",
+    "Blu Ray Filmler": "/filmizle/bluray-filmler/",
+    "Çizgi Filmler": "/filmizle/cizgi-filmler/",
+    "Dram Filmleri": "/filmizle/dram-filmleri/",
+    "Fantastik Filmler": "/filmizle/fantastik-filmler/",
+    "Gerilim Filmleri": "/filmizle/gerilim-filmleri/",
+    "Gizem Filmleri": "/filmizle/gizem-filmleri/",
+    "Hint Filmleri": "/filmizle/hint-filmleri/",
+    "Komedi Filmleri": "/filmizle/komedi-filmleri/",
+    "Korku Filmleri": "/filmizle/korku-filmleri/",
+    "Macera Filmleri": "/filmizle/macera-filmleri/",
+    "Müzikal Filmler": "/filmizle/muzikal-filmler/",
+    "Polisiye Filmleri": "/filmizle/polisiye-filmleri/",
+    "Psikolojik Filmler": "/filmizle/psikolojik-filmler/",
+    "Romantik Filmler": "/filmizle/romantik-filmler/",
+    "Savaş Filmleri": "/filmizle/savas-filmleri/",
+    "Suç Filmleri": "/filmizle/suc-filmleri/",
+    "Tarih Filmleri": "/filmizle/tarih-filmleri/",
+    "Western Filmler": "/filmizle/western-filmler/",
+    "Yerli Filmler": "/filmizle/yerli-filmler/"
+}
+
+PROXY = {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}
+session = requests.Session(impersonate="chrome120", proxies=PROXY)
+session.headers.update({
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "tr-TR,tr;q=0.9",
+    "Referer": "https://www.google.com/"
+})
+
+def telegram_mesaj_gonder(mesaj):
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "HTML"}
+            session.post(url, json=payload, timeout=10)
+        except: pass
+
+def baslik_temizle(baslik):
+    silinecek_kelimeler = [" Türkçe Dublaj İzle", " Türkçe Dublaj", " Full HD İzle", " HD İzle", " 1080p İzle", " Altyazılı İzle", " izle"]
+    for kelime in silinecek_kelimeler:
+        baslik = re.sub(kelime, "", baslik, flags=re.IGNORECASE)
+    return baslik.strip()
+
+def gecerli_oynatici_mi(url):
+    if not url or len(url) < 10: return False
+    url_low = url.lower()
+    yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js"]
+    if any(uzanti in url_low for uzanti in yasakli_uzantilar): return False
+    yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "ads", "imdb.com"]
+    if any(yasak in url_low for yasak in yasakli_siteler): return False
+    gecerli_sunucular = ["trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", "video", "iframe", "proton", "fast"]
+    if any(gecerli in url_low for gecerli in gecerli_sunucular): return True
+    return False
+
+def decode_iframe(s):
+    if not isinstance(s, str) or len(s) < 10: return None
+    s = s.strip()
+    s_pad = s + '=' * (-len(s) % 4)
+    for method in ['rot13_b64', 'b64']:
+        try:
+            dec = base64.b64decode(codecs.encode(s_pad, 'rot_13')).decode('utf-8') if method == 'rot13_b64' else base64.b64decode(s_pad).decode('utf-8')
+            if "http" in dec: 
+                temiz_link = dec.replace("\\/", "/")
+                if gecerli_oynatici_mi(temiz_link): return temiz_link
+        except: pass
+    return None
+
+def extract_movie_data(film_url):
+    try:
+        req = session.get(film_url, timeout=15)
+        soup = BeautifulSoup(req.text, 'html.parser')
         
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Poppins', sans-serif; }
-        body { background-color: var(--bg-dark); color: var(--text-main); overflow-x: hidden; scroll-behavior: smooth; }
+        sayfa_metni = soup.text.lower()
+        yasakli_durumlar = ["yapım aşamasında", "henüz sitemize eklenmemiştir", "yakında sinemalarda", "telif hakkı nedeniyle kaldırılmıştır"]
+        for durum in yasakli_durumlar:
+            if durum in sayfa_metni: return {"aciklama": "", "iframe": None, "hata": "Yapım Aşamasında / Telif Yemiş"}
 
-        /* NAVBAR & ARAMA & AKILLI BUTONLAR */
-        .navbar { display: flex; align-items: center; justify-content: space-between; padding: 15px 4%; background: rgba(0,0,0,0.95); backdrop-filter: blur(15px); position: sticky; top: 0; z-index: 100; border-bottom: 2px solid var(--primary); flex-wrap: wrap; gap: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); }
-        .nav-left { display: flex; align-items: center; gap: 15px; }
-        .logo { font-size: 22px; font-weight: 800; color: var(--primary); letter-spacing: 1px; text-transform: uppercase; cursor: pointer; }
-        .logo span { color: white; }
-        .menu-icon { font-size: 26px; cursor: pointer; color: white; display: flex; align-items: center; gap: 8px; transition: 0.3s; }
-        .menu-icon:hover { color: var(--primary); }
-        
-        .nav-tools { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
-        .search-container { max-width: 350px; width: 100%; position: relative; }
-        .search-input { width: 100%; padding: 10px 18px; border-radius: 20px; border: 1px solid #333; background: #111; color: white; font-size: 13px; outline: none; transition: 0.3s; }
-        .search-input:focus { border-color: var(--primary); box-shadow: 0 0 15px rgba(214, 0, 0, 0.4); }
-        
-        .random-btn { background: #222; color: white; border: 1px solid #444; padding: 10px 15px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.3s; display: flex; align-items: center; gap: 5px; }
-        .random-btn:hover { background: var(--primary); border-color: var(--primary); box-shadow: 0 0 10px var(--primary); transform: scale(1.05); }
+        aciklama = ""
+        ozet_div = soup.select_one(".ozet, .summary, .film-content, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
+        if ozet_div: aciklama = ozet_div.text.strip()
+        if not aciklama or len(aciklama) < 10:
+            paragraphs = soup.select('article p, .post-content p')
+            if paragraphs: aciklama = " ".join([p.text.strip() for p in paragraphs if len(p.text.strip()) > 15])
+        if not aciklama or len(aciklama) < 10:
+            meta_desc = soup.select_one('meta[name="description"]')
+            if meta_desc: aciklama = meta_desc.get("content", "").strip()
+        if not aciklama: aciklama = "Bu film için açıklama bulunamadı."
 
-        /* YAN MENÜ */
-        .sidebar { height: 100%; width: 0; position: fixed; z-index: 1000; top: 0; left: 0; background-color: #0c0c0c; overflow-x: hidden; transition: 0.4s; padding-top: 60px; border-right: 2px solid var(--primary); box-shadow: 5px 0 20px rgba(0,0,0,0.8); }
-        .sidebar a { padding: 12px 25px; text-decoration: none; font-size: 14px; color: #ccc; display: block; transition: 0.3s; border-bottom: 1px solid #1a1a1a; cursor: pointer; }
-        .sidebar a:hover, .sidebar a.active { color: white; background-color: var(--primary); padding-left: 35px; border-left: 4px solid white; font-weight: 600; }
-        .sidebar .closebtn { position: absolute; top: 10px; right: 20px; font-size: 36px; border: none; background: transparent; padding: 0; color: white; }
-        .sidebar h2 { color: white; padding-left: 25px; margin-bottom: 15px; font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: var(--primary); }
+        iframe_linki = None
+        scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
+        if scx_match:
+            encoded_strings = re.findall(r"'(.*?)'", str(json.loads(scx_match.group(1))))
+            for code in encoded_strings:
+                dec = decode_iframe(code)
+                if dec: 
+                    iframe_linki = dec
+                    break
 
-        /* FİLM IZGARASI */
-        .main-content { padding: 25px 4%; transition: margin-left 0.4s; min-height: 80vh; }
-        .header-box { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
-        .category-title { font-size: 20px; font-weight: 600; color: white; border-left: 4px solid var(--primary); padding-left: 10px; text-transform: uppercase; }
-        
-        .sort-select { background: #111; color: white; border: 1px solid #333; padding: 8px 15px; border-radius: 8px; outline: none; cursor: pointer; font-family: 'Poppins'; }
-        
-        .movie-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; }
-        
-        .movie-card { background: var(--bg-card); border-radius: 8px; overflow: hidden; position: relative; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 10px rgba(0,0,0,0.5); border: 1px solid #222; }
-        .movie-card:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(214, 0, 0, 0.4); border-color: var(--primary); z-index: 10; }
-        .img-wrapper { position: relative; width: 100%; height: 180px; } 
-        .movie-card img { width: 100%; height: 100%; object-fit: cover; transition: 0.3s; }
-        .movie-card:hover img { opacity: 0.3; }
-        
-        .play-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0); font-size: 35px; color: var(--primary); transition: 0.3s; }
-        .movie-card:hover .play-overlay { transform: translate(-50%, -50%) scale(1); }
-        
-        .movie-info { padding: 8px; background: linear-gradient(to top, rgba(0,0,0,1) 70%, transparent); position: absolute; bottom: 0; width: 100%; }
-        .movie-title { font-size: 11px; font-weight: 600; color: white; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; text-shadow: 1px 1px 3px black; text-align: center; }
-        
-        .load-more-container { text-align: center; margin-top: 40px; padding-bottom: 20px; }
-        .btn-load-more { background: rgba(214, 0, 0, 0.1); color: white; border: 2px solid var(--primary); padding: 12px 40px; font-size: 15px; border-radius: 30px; cursor: pointer; transition: 0.3s; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
-        .btn-load-more:hover { background: var(--primary); box-shadow: 0 0 20px var(--primary); transform: translateY(-3px); }
-
-        /* FİLM DETAY MODALI */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); backdrop-filter: blur(10px); z-index: 2000; justify-content: center; align-items: center; padding: 15px; }
-        .modal-content { background: #0f0f0f; width: 100%; max-width: 850px; border-radius: 12px; overflow: hidden; position: relative; display: flex; flex-direction: column; max-height: 90vh; border: 1px solid #333; box-shadow: 0 0 30px black; }
-        .close-modal { position: absolute; top: 15px; right: 20px; font-size: 30px; color: white; cursor: pointer; z-index: 10; transition: 0.3s; }
-        .close-modal:hover { color: var(--primary); transform: rotate(90deg); }
-        
-        .modal-body { display: flex; padding: 30px; gap: 25px; flex-wrap: wrap; }
-        .modal-poster { width: 170px; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.8); border: 1px solid #333; }
-        .modal-details { flex: 1; min-width: 200px; display: flex; flex-direction: column; justify-content: center; }
-        .modal-title { font-size: 24px; font-weight: 800; color: white; margin-bottom: 10px; }
-        .modal-badge { display: inline-block; background: var(--primary); font-size: 11px; padding: 4px 10px; border-radius: 4px; margin-bottom: 15px; font-weight: bold; text-transform: uppercase; align-self: flex-start; }
-        .modal-desc { font-size: 13px; color: #ccc; line-height: 1.6; max-height: 140px; overflow-y: auto; margin-bottom: 20px; padding-right: 5px; }
-        
-        .btn-play { background: var(--primary); color: white; border: none; padding: 14px 30px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; display: inline-flex; align-items: center; justify-content: center; gap: 10px; text-transform: uppercase; box-shadow: 0 5px 15px rgba(214, 0, 0, 0.4); align-self: flex-start; }
-        .btn-play:hover { background: #a30000; transform: scale(1.05); }
-
-        .player-wrapper { display: none; width: 100%; aspect-ratio: 16/9; background: #000; position: relative; }
-        .player-wrapper iframe { width: 100%; height: 100%; border: none; }
-        
-        @media (max-width: 768px) {
-            .nav-tools { width: 100%; justify-content: space-between; margin-top: 10px; }
-            .search-container { max-width: 70%; }
-            .menu-text { display: none; }
-            .movie-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; }
-            .img-wrapper { height: 135px; }
-            .movie-title { font-size: 10px; }
-            .modal-body { flex-direction: column; align-items: center; text-align: center; }
-            .modal-badge, .btn-play { align-self: center; }
-        }
-    </style>
-</head>
-<body>
-
-    <nav class="navbar">
-        <div class="nav-left">
-            <div class="menu-icon" onclick="openNav()">&#9776;</div>
-            <div class="logo" onclick="location.reload()">İNADINA <span>TV</span></div>
-        </div>
-        <div class="nav-tools">
-            <button class="random-btn" onclick="openRandomMovie()" title="Bana Film Öner">🎲 Rastgele</button>
-            <div class="search-container">
-                <input type="text" id="searchInput" class="search-input" placeholder="Film Ara...">
-            </div>
-        </div>
-    </nav>
-
-    <div id="mySidebar" class="sidebar">
-        <a href="javascript:void(0)" class="closebtn" onclick="closeNav()">&times;</a>
-        <h2>Filtrele</h2>
-        <a onclick="filterCategory('Tümü', this)" class="cat-link active">🎬 Tüm Filmler</a>
-        <div id="category-list"></div>
-    </div>
-
-    <div class="main-content" id="main">
-        <div class="header-box">
-            <h2 class="category-title" id="current-cat-title">Tüm Filmler</h2>
-            
-            <select class="sort-select" id="sortSelect" onchange="sortMovies()">
-                <option value="newest">🔥 En Yeniler</option>
-                <option value="az">A - Z Sırala</option>
-                <option value="za">Z - A Sırala</option>
-            </select>
-        </div>
-        
-        <div class="movie-grid" id="movie-container"></div>
-        
-        <div class="load-more-container" id="load-more-container" style="display: none;">
-            <button class="btn-load-more" onclick="loadMore()">Daha Fazla Göster (100 Film) ↓</button>
-        </div>
-    </div>
-
-    <div class="modal" id="movie-modal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeModal()">&times;</span>
-            <div class="modal-body" id="modal-info">
-                <img id="modal-img" class="modal-poster" src="" alt="Afiş">
-                <div class="modal-details">
-                    <div class="modal-title" id="modal-title">Başlık</div>
-                    <div class="modal-badge" id="modal-cat">Kategori</div>
-                    <div class="modal-desc" id="modal-desc">Açıklama</div>
-                    <button class="btn-play" id="play-btn">▶ Filmi Başlat (Tam Ekran)</button>
-                </div>
-            </div>
-            <div class="player-wrapper" id="player-container">
-                <iframe id="video-player" allowfullscreen></iframe>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let allMovies = [];
-        let filteredMovies = [];
-        let displayedCount = 0;
-        const MOVIES_PER_PAGE = 100;
-
-        function openNav() { document.getElementById("mySidebar").style.width = "260px"; }
-        function closeNav() { document.getElementById("mySidebar").style.width = "0"; }
-
-        // VERİTABANINI ÇEK VE SİTEYİ BAŞLAT
-        fetch('veritabani.json')
-            .then(response => response.json())
-            .then(data => {
-                allMovies = data.filmler;
-                filteredMovies = [...allMovies]; 
-                
-                let unqiueCats = [...new Set(allMovies.map(m => m.kategori))].sort();
-                renderSidebar(unqiueCats); 
-                
-                // SİTE İLK AÇILDIĞINDA DOĞRUDAN EN YENİLERİ KARIŞIK OLARAK DİZER!
-                sortMovies(); 
-            })
-            .catch(err => {
-                document.getElementById('movie-container').innerHTML = '<h3 style="color:var(--primary); margin-left:15px;">Arşiv Yükleniyor... Lütfen Bekleyin.</h3>';
-            });
-
-        function renderSidebar(cats) {
-            const list = document.getElementById('category-list');
-            list.innerHTML = ""; 
-            cats.forEach(cat => {
-                const a = document.createElement('a');
-                a.className = 'cat-link';
-                a.innerText = cat;
-                a.onclick = function() { filterCategory(cat, this); };
-                list.appendChild(a);
-            });
-        }
-
-        function filterCategory(cat, element) {
-            document.querySelectorAll('.cat-link').forEach(el => el.classList.remove('active'));
-            if(element) element.classList.add('active');
-            
-            document.getElementById('current-cat-title').innerText = cat;
-            document.getElementById('searchInput').value = ""; 
-            closeNav();
-
-            if (cat === 'Tümü') {
-                filteredMovies = [...allMovies];
-            } else {
-                filteredMovies = allMovies.filter(m => m.kategori === cat);
-            }
-            sortMovies(); 
-        }
-
-        document.getElementById('searchInput').addEventListener('keyup', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            document.getElementById('current-cat-title').innerText = searchTerm ? `Arama: "${searchTerm}"` : "Tüm Filmler";
-            document.querySelectorAll('.cat-link').forEach(el => el.classList.remove('active'));
-            
-            filteredMovies = allMovies.filter(m => m.baslik.toLowerCase().includes(searchTerm));
-            sortMovies();
-        });
-
-        // 🧠 YZ DESTEKLİ SIRALAMA MANTIĞI 
-        function sortMovies() {
-            const sortType = document.getElementById('sortSelect').value;
-            
-            if(sortType === 'az') {
-                filteredMovies.sort((a, b) => a.baslik.localeCompare(b.baslik));
-            } else if (sortType === 'za') {
-                filteredMovies.sort((a, b) => b.baslik.localeCompare(a.baslik));
-            } else {
-                // "EN YENİLER" MANTIĞI:
-                // Tüm kategorilerin 1. sayfasındaki filmleri birbirine karıştırır ve en üste (site ana sayfasına) koyar!
-                filteredMovies.sort((a, b) => {
-                    let sayfaA = a.sayfa || 100;
-                    let sayfaB = b.sayfa || 100;
+        if not iframe_linki:
+            for tag in soup.find_all(['iframe', 'embed']):
+                val = tag.get('src') or tag.get('data-src') or tag.get('data-lazy-src')
+                if val and val.startswith('//'): val = "https:" + val
+                if gecerli_oynatici_mi(val):
+                    iframe_linki = val
+                    break
                     
-                    if (sayfaA !== sayfaB) {
-                        return sayfaA - sayfaB; // Sayfa 1 olanlar en üste çıkar
-                    }
-                    // Sayfası aynıysa (İkisi de Sayfa 1 ise), botun bugün/dün çektiği (ID'si en büyük olan) en üste çıkar!
-                    return b.id - a.id;
-                });
-            }
-            renderMovies(true);
-        }
+        if not iframe_linki:
+            embed_match = re.search(r'[\"\'](https?://[^\"\']+(?:embed|v|player|video|play|rapidvid|vidmoly)[^\"\']+)[\"\']', req.text)
+            if embed_match:
+                link = embed_match.group(1).replace("\\/", "/")
+                if gecerli_oynatici_mi(link): iframe_linki = link
 
-        function openRandomMovie() {
-            if(allMovies.length === 0) return;
-            const randomIndex = Math.floor(Math.random() * allMovies.length);
-            openModal(allMovies[randomIndex]);
-        }
+        if not iframe_linki: return {"aciklama": aciklama, "iframe": None, "hata": "Oynatıcı Bulunamadı"}
+        return {"aciklama": aciklama, "iframe": iframe_linki, "hata": None}
+    except Exception as e:
+        return {"aciklama": "Veri alınamadı.", "iframe": None, "hata": f"Bağlantı Hatası: {e}"}
 
-        function renderMovies(reset = false) {
-            const container = document.getElementById('movie-container');
-            const loadMoreBtn = document.getElementById('load-more-container');
-            
-            if (reset) {
-                container.innerHTML = '';
-                displayedCount = 0;
-            }
+def bot_calistir():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f: veritabani = json.load(f)
+    else: veritabani = {"kategoriler": list(KATEGORILER.keys()), "filmler": []}
 
-            if(filteredMovies.length === 0) {
-                container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; color:#ccc;">Bulunamadı.</p>';
-                loadMoreBtn.style.display = 'none';
-                return;
-            }
-
-            const moviesToShow = filteredMovies.slice(displayedCount, displayedCount + MOVIES_PER_PAGE);
-            
-            moviesToShow.forEach(movie => {
-                const card = document.createElement('div');
-                card.className = 'movie-card';
-                card.onclick = () => openModal(movie);
-                card.innerHTML = `
-                    <div class="img-wrapper">
-                        <img src="${movie.afis}" alt="${movie.baslik}" loading="lazy">
-                        <div class="play-overlay">▶</div>
-                        <div class="movie-info">
-                            <div class="movie-title">${movie.baslik}</div>
-                        </div>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-
-            displayedCount += moviesToShow.length;
-            loadMoreBtn.style.display = (displayedCount < filteredMovies.length) ? 'block' : 'none';
-        }
-
-        function loadMore() {
-            renderMovies(false);
-        }
-
-        const modal = document.getElementById('movie-modal');
-        const playerContainer = document.getElementById('player-container');
-        const videoPlayer = document.getElementById('video-player');
-        const modalInfo = document.getElementById('modal-info');
-        const playBtn = document.getElementById('play-btn');
-
-        function openModal(movie) {
-            document.getElementById('modal-img').src = movie.afis;
-            document.getElementById('modal-title').innerText = movie.baslik;
-            document.getElementById('modal-cat').innerText = movie.kategori;
-            document.getElementById('modal-desc').innerText = movie.aciklama;
-            
-            modalInfo.style.display = 'flex';
-            playerContainer.style.display = 'none';
-            videoPlayer.src = ''; 
-            
-            playBtn.onclick = () => {
-                modalInfo.style.display = 'none'; 
-                playerContainer.style.display = 'block'; 
-                videoPlayer.src = movie.iframe; 
+    mevcut_basliklar = [film["baslik"] for film in veritabani.get("filmler", [])]
+    genel_toplam_yeni_film = 0 
+    
+    print("\n" + "="*50)
+    print("🚀 İNADINA TV - OYNATICI DOĞRULAMALI DERİN KAZICI")
+    print("="*50)
+    
+    for kategori_adi, url_yolu in KATEGORILER.items():
+        kategori_yeni_film_sayisi = 0
+        print(f"\n📁 [KATEGORİ BAŞLADI]: {kategori_adi} taranıyor...")
+        
+        sayfa = 1
+        hedef_url = BASE_URL + url_yolu
+        gercek_kategori_linki = hedef_url
+        
+        while True:
+            try:
+                if sayfa > 1: time.sleep(random.uniform(0.5, 1.5))
+                req = session.get(hedef_url, timeout=20)
                 
-                if (playerContainer.requestFullscreen) playerContainer.requestFullscreen();
-                else if (playerContainer.mozRequestFullScreen) playerContainer.mozRequestFullScreen();
-                else if (playerContainer.webkitRequestFullscreen) playerContainer.webkitRequestFullscreen();
-                else if (playerContainer.msRequestFullscreen) playerContainer.msRequestFullscreen();
-            };
-            modal.style.display = 'flex';
-        }
+                if sayfa == 1:
+                    gercek_kategori_linki = req.url
+                    if not gercek_kategori_linki.endswith('/'): gercek_kategori_linki += '/'
 
-        function closeModal() {
-            modal.style.display = 'none';
-            videoPlayer.src = ''; 
-            playerContainer.style.display = 'none';
-            
-            if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
-                if (document.exitFullscreen) document.exitFullscreen();
-                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-            }
-        }
+                if req.status_code == 404: break
 
-        window.onclick = function(event) {
-            if (event.target == modal) closeModal();
-        }
-    </script>
-</body>
-</html>
+                soup = BeautifulSoup(req.content, 'html.parser')
+                film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
+                if not film_listesi: break
+
+                print(f"  📄 Sayfa {sayfa} taranıyor... (İncelenen film: {len(film_listesi)})")
+                
+                for li in film_listesi:
+                    baslik_elem = li.select_one("span.film-title, h2.title, a.title")
+                    ham_baslik = baslik_elem.text.strip() if baslik_elem else ""
+                    if not ham_baslik: continue
+                    baslik = baslik_temizle(ham_baslik)
+                    
+                    if baslik in mevcut_basliklar: continue 
+
+                    link_elem = li.select_one("a")
+                    film_url = link_elem.get("href") if link_elem else ""
+                    if not film_url.startswith("http"): film_url = BASE_URL + film_url
+                    
+                    img = li.select_one("img")
+                    afis = img.get("data-src") or img.get("src") or "" if img else ""
+                    
+                    detay = extract_movie_data(film_url)
+                    
+                    if detay["iframe"]:
+                        print(f"    ✅ Eklendi: {baslik}")
+                        veritabani["filmler"].append({
+                            "id": len(veritabani["filmler"]) + 1,
+                            "baslik": baslik,
+                            "kategori": kategori_adi,
+                            "afis": afis,
+                            "aciklama": detay["aciklama"],
+                            "iframe": detay["iframe"],
+                            "sayfa": sayfa # YENİ YZ SIRALAMA İÇİN EKLENDİ!
+                        })
+                        mevcut_basliklar.append(baslik)
+                        kategori_yeni_film_sayisi += 1
+                        genel_toplam_yeni_film += 1
+                    else:
+                        print(f"    ❌ Reddedildi ({detay['hata']}): {baslik}")
+                        
+                sayfa += 1
+                next_tag = soup.find('a', class_='next') or soup.select_one('.pagination a.next, a.next-page, a.ileri, a.sonraki')
+                if next_tag and next_tag.get('href') and len(next_tag.get('href')) > 5:
+                    next_url = next_tag.get('href')
+                    hedef_url = next_url if next_url.startswith('http') else (BASE_URL + next_url if next_url.startswith('/') else BASE_URL + "/" + next_url)
+                else:
+                    olasi_linkler = [gercek_kategori_linki + f"page/{sayfa}/", gercek_kategori_linki + f"sayfa/{sayfa}/", gercek_kategori_linki + f"sayfa-{sayfa}/"]
+                    sayfa_bulundu = False
+                    for link in olasi_linkler:
+                        req_test = session.get(link, timeout=15)
+                        if req_test.status_code == 200 and BeautifulSoup(req_test.content, 'html.parser').select("li.film, div.movie-item, article.film"):
+                            hedef_url = link
+                            sayfa_bulundu = True
+                            break
+                    if not sayfa_bulundu: break
+
+            except Exception as e:
+                print(f"  [!] Hata: {e}")
+                break
+                
+        print(f"✅ {kategori_adi} bitti! Toplam {kategori_yeni_film_sayisi} gerçek video çekildi.")
+
+    if genel_toplam_yeni_film > 0:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(veritabani, f, ensure_ascii=False, indent=4)
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Gerçek Videolu Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {len(veritabani['filmler'])}\n\nVercel siteniz güncellendi! 🚀"
+        telegram_mesaj_gonder(tg_mesaj)
+
+if __name__ == "__main__":
+    bot_calistir()
