@@ -73,7 +73,9 @@ def gecerli_oynatici_mi(url):
     if any(uzanti in url_low for uzanti in yasakli_uzantilar): return False
     yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "ads", "imdb.com"]
     if any(yasak in url_low for yasak in yasakli_siteler): return False
-    gecerli_sunucular = ["trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", "video", "iframe", "proton", "fast"]
+    
+    # Yeni domain ile gelmiş olabilecek potansiyel yeni sunucular eklendi
+    gecerli_sunucular = ["trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", "video", "iframe", "proton", "fast", "stream", "cdn", "hdpass", "netu", "watch"]
     if any(gecerli in url_low for gecerli in gecerli_sunucular): return True
     return False
 
@@ -112,6 +114,8 @@ def extract_movie_data(film_url):
         if not aciklama: aciklama = "Bu film için açıklama bulunamadı."
 
         iframe_linki = None
+        
+        # 1. ESKİ YÖNTEM: scx veya data JSON Objesi
         scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
         if scx_match:
             encoded_strings = re.findall(r"'(.*?)'", str(json.loads(scx_match.group(1))))
@@ -121,14 +125,35 @@ def extract_movie_data(film_url):
                     iframe_linki = dec
                     break
 
+        # 2. YENİ YÖNTEM: Sayfadaki tüm şüpheli Base64 şifrelemelerini tara
+        if not iframe_linki:
+            base64_adaylari = re.findall(r'[\"\']([a-zA-Z0-9+/=]{40,})[\"\']', req.text)
+            for b64 in base64_adaylari:
+                dec = decode_iframe(b64)
+                if dec: 
+                    iframe_linki = dec
+                    break
+
+        # 3. YENİ YÖNTEM: Gelişmiş iframe ve embed taraması
         if not iframe_linki:
             for tag in soup.find_all(['iframe', 'embed']):
-                val = tag.get('src') or tag.get('data-src') or tag.get('data-lazy-src')
-                if val and val.startswith('//'): val = "https:" + val
-                if gecerli_oynatici_mi(val):
-                    iframe_linki = val
-                    break
+                val = tag.get('src') or tag.get('data-src') or tag.get('data-lazy-src') or tag.get('data-original')
+                if val:
+                    if val.startswith('//'): val = "https:" + val
+                    if gecerli_oynatici_mi(val):
+                        iframe_linki = val
+                        break
                     
+        # 4. YENİ YÖNTEM: Gizli div/buton özniteliklerinde iframe linki arama (Yeni temalarda çok kullanılır)
+        if not iframe_linki:
+            for tag in soup.find_all(['div', 'a', 'button', 'li']):
+                for attr in ['data-src', 'data-link', 'data-url', 'data-embed', 'data-player']:
+                    val = tag.get(attr)
+                    if val and "http" in val and gecerli_oynatici_mi(val):
+                        iframe_linki = val
+                        break
+                if iframe_linki: break
+
         if not iframe_linki:
             embed_match = re.search(r'[\"\'](https?://[^\"\']+(?:embed|v|player|video|play|rapidvid|vidmoly)[^\"\']+)[\"\']', req.text)
             if embed_match:
@@ -189,8 +214,18 @@ def bot_calistir():
                     film_url = link_elem.get("href") if link_elem else ""
                     if not film_url.startswith("http"): film_url = BASE_URL + film_url
                     
+                    # KAPAK (AFİŞ) DÜZELTMESİ BURADA YAPILDI
                     img = li.select_one("img")
-                    afis = img.get("data-src") or img.get("src") or "" if img else ""
+                    afis = ""
+                    if img:
+                        # Olası tüm lazy-load özniteliklerini tara
+                        afis = img.get("data-original") or img.get("data-src") or img.get("data-lazy-src") or img.get("src") or ""
+                        
+                        # Eğer afiş linki // ile başlıyorsa düzelt
+                        if afis.startswith("//"):
+                            afis = "https:" + afis
+                        elif afis.startswith("/") and not afis.startswith("//"):
+                            afis = BASE_URL + afis
                     
                     detay = extract_movie_data(film_url)
                     
@@ -203,7 +238,7 @@ def bot_calistir():
                             "afis": afis,
                             "aciklama": detay["aciklama"],
                             "iframe": detay["iframe"],
-                            "sayfa": sayfa # YENİ YZ SIRALAMA İÇİN EKLENDİ!
+                            "sayfa": sayfa 
                         })
                         mevcut_basliklar.append(baslik)
                         kategori_yeni_film_sayisi += 1
