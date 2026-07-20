@@ -69,13 +69,19 @@ def baslik_temizle(baslik):
 def gecerli_oynatici_mi(url):
     if not url or len(url) < 10: return False
     url_low = url.lower()
-    yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js"]
+    
+    yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js", ".xml"]
     if any(uzanti in url_low for uzanti in yasakli_uzantilar): return False
+    
     yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "ads", "imdb.com"]
     if any(yasak in url_low for yasak in yasakli_siteler): return False
     
-    # Yeni domain ile gelmiş olabilecek potansiyel yeni sunucular eklendi
-    gecerli_sunucular = ["trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", "video", "iframe", "proton", "fast", "stream", "cdn", "hdpass", "netu", "watch"]
+    # Rapidvid ve türevlerini sorunsuz geçirmesi için liste genişletildi
+    gecerli_sunucular = [
+        "trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", 
+        "video", "iframe", "proton", "fast", "stream", "cdn", "hdpass", 
+        "netu", "watch", "ok.ru", "mail.ru", "vk.com", "uqload", "dood"
+    ]
     if any(gecerli in url_low for gecerli in gecerli_sunucular): return True
     return False
 
@@ -115,50 +121,37 @@ def extract_movie_data(film_url):
 
         iframe_linki = None
         
-        # 1. ESKİ YÖNTEM: scx veya data JSON Objesi
-        scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
-        if scx_match:
-            encoded_strings = re.findall(r"'(.*?)'", str(json.loads(scx_match.group(1))))
-            for code in encoded_strings:
-                dec = decode_iframe(code)
-                if dec: 
-                    iframe_linki = dec
-                    break
+        # 1. YÖNTEM: Sayfa kaynağındaki TÜM tırnak içi URL'leri yakala ve doğrula (KESİN ÇÖZÜM)
+        # Javascript veya farklı div'ler içine gizlenmiş "https://rapidvid..." linklerini kaçırmaz.
+        tum_linkler = re.findall(r'[\"\'](https?://[^\s\"\'<>]+)[\"\']', req.text)
+        for link in tum_linkler:
+            link = link.replace("\\/", "/")
+            if gecerli_oynatici_mi(link):
+                iframe_linki = link
+                break
 
-        # 2. YENİ YÖNTEM: Sayfadaki tüm şüpheli Base64 şifrelemelerini tara
+        # 2. YÖNTEM: İframe ve div etiketlerinin tüm özelliklerini bağımsız tara
         if not iframe_linki:
-            base64_adaylari = re.findall(r'[\"\']([a-zA-Z0-9+/=]{40,})[\"\']', req.text)
-            for b64 in base64_adaylari:
-                dec = decode_iframe(b64)
-                if dec: 
-                    iframe_linki = dec
-                    break
-
-        # 3. YENİ YÖNTEM: Gelişmiş iframe ve embed taraması
-        if not iframe_linki:
-            for tag in soup.find_all(['iframe', 'embed']):
-                val = tag.get('src') or tag.get('data-src') or tag.get('data-lazy-src') or tag.get('data-original')
-                if val:
-                    if val.startswith('//'): val = "https:" + val
-                    if gecerli_oynatici_mi(val):
-                        iframe_linki = val
-                        break
-                    
-        # 4. YENİ YÖNTEM: Gizli div/buton özniteliklerinde iframe linki arama (Yeni temalarda çok kullanılır)
-        if not iframe_linki:
-            for tag in soup.find_all(['div', 'a', 'button', 'li']):
-                for attr in ['data-src', 'data-link', 'data-url', 'data-embed', 'data-player']:
+            for tag in soup.find_all(['iframe', 'embed', 'div', 'a', 'button']):
+                for attr in ['src', 'data-src', 'data-lazy-src', 'data-original', 'data-link']:
                     val = tag.get(attr)
-                    if val and "http" in val and gecerli_oynatici_mi(val):
-                        iframe_linki = val
-                        break
+                    if val and isinstance(val, str) and "http" in val:
+                        if val.startswith('//'): val = "https:" + val
+                        if gecerli_oynatici_mi(val):
+                            iframe_linki = val
+                            break
                 if iframe_linki: break
 
+        # 3. YÖNTEM: Base64 / SCX Şifreleme Çözücü
         if not iframe_linki:
-            embed_match = re.search(r'[\"\'](https?://[^\"\']+(?:embed|v|player|video|play|rapidvid|vidmoly)[^\"\']+)[\"\']', req.text)
-            if embed_match:
-                link = embed_match.group(1).replace("\\/", "/")
-                if gecerli_oynatici_mi(link): iframe_linki = link
+            scx_match = re.search(r'(?:scx|data)\s*=\s*(\{.*?\});', req.text)
+            if scx_match:
+                encoded_strings = re.findall(r"'(.*?)'", str(json.loads(scx_match.group(1))))
+                for code in encoded_strings:
+                    dec = decode_iframe(code)
+                    if dec: 
+                        iframe_linki = dec
+                        break
 
         if not iframe_linki: return {"aciklama": aciklama, "iframe": None, "hata": "Oynatıcı Bulunamadı"}
         return {"aciklama": aciklama, "iframe": iframe_linki, "hata": None}
@@ -214,14 +207,11 @@ def bot_calistir():
                     film_url = link_elem.get("href") if link_elem else ""
                     if not film_url.startswith("http"): film_url = BASE_URL + film_url
                     
-                    # KAPAK (AFİŞ) DÜZELTMESİ BURADA YAPILDI
+                    # KAPAK (AFİŞ) DÜZELTMESİ
                     img = li.select_one("img")
                     afis = ""
                     if img:
-                        # Olası tüm lazy-load özniteliklerini tara
                         afis = img.get("data-original") or img.get("data-src") or img.get("data-lazy-src") or img.get("src") or ""
-                        
-                        # Eğer afiş linki // ile başlıyorsa düzelt
                         if afis.startswith("//"):
                             afis = "https:" + afis
                         elif afis.startswith("/") and not afis.startswith("//"):
