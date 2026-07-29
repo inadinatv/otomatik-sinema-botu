@@ -11,7 +11,7 @@ from curl_cffi import requests
 # ==========================================
 # ⚙️ SİSTEM AYARLARI
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.cz"
+BASE_URL = "https://www.fullhdfilmizlesene.cz" # GÜNCEL DOMAIN
 DB_FILE = "veritabani.json"
 
 TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
@@ -49,7 +49,7 @@ session = requests.Session(impersonate="chrome120", proxies=PROXY)
 session.headers.update({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "tr-TR,tr;q=0.9",
-    "Referer": "https://www.google.com/"
+    "Referer": BASE_URL + "/"
 })
 
 def telegram_mesaj_gonder(mesaj):
@@ -70,15 +70,12 @@ def gecerli_oynatici_mi(url):
     if not url or len(url) < 10: return False
     url_low = url.lower().replace("\\/", "/")
     
-    # 1. Aşama: Oynatıcı olması İMKANSIZ olan uzantıları engelle
     yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js", ".xml", ".woff", ".ttf", ".ico"]
     if any(uzanti in url_low for uzanti in yasakli_uzantilar): return False
     
-    # 2. Aşama: Sosyal medya ve reklam sitelerini engelle
     yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "facebook.com", "twitter.com", "imdb.com", "themoviedb.org", "w3.org", "analytics"]
     if any(yasak in url_low for yasak in yasakli_siteler): return False
     
-    # 3. Aşama: BEYAZ LİSTE (Rapidvid ve tüm bilinen film sunucuları)
     gecerli_sunucular = [
         "trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", 
         "video", "iframe", "proton", "fast", "stream", "cdn", "hdpass", 
@@ -99,7 +96,6 @@ def decode_iframe(s):
             else:
                 dec = base64.b64decode(s_pad).decode('utf-8', errors='ignore')
             
-            # Çözülen metin bir bağlantı mı?
             if "http" in dec or dec.startswith("//"): 
                 temiz_link = dec.replace("\\/", "/")
                 if temiz_link.startswith("//"): temiz_link = "https:" + temiz_link
@@ -110,7 +106,7 @@ def decode_iframe(s):
 def extract_movie_data(film_url):
     try:
         req = session.get(film_url, timeout=15)
-        html_content = req.text.replace("\\/", "/") # Gizli slash kaçışlarını düzelt
+        html_content = req.text.replace("\\/", "/")
         soup = BeautifulSoup(html_content, 'html.parser')
         
         sayfa_metni = html_content.lower()
@@ -131,25 +127,30 @@ def extract_movie_data(film_url):
 
         iframe_linki = None
         
-        # 🟢 YÖNTEM 1: Agresif Etiket Taraması (TÜM HTML elementlerini ve özelliklerini tarar)
-        for tag in soup.find_all(True):
-            for attr, val in tag.attrs.items():
-                if isinstance(val, str) and len(val) > 10:
-                    # Direk temiz link varsa:
-                    if "http" in val or val.startswith("//"):
-                        temiz_val = val if val.startswith("http") else "https:" + val
-                        if gecerli_oynatici_mi(temiz_val):
-                            iframe_linki = temiz_val
-                            break
-                    # Base64 ile şifrelenip butona gizlenmiş link varsa (Örn: data-url="aHR0cHM...")
-                    if attr.startswith("data-") and not " " in val:
+        # 🟢 YÖNTEM 1: Iframe etiketlerini doğrudan tarama (Öncelikli Yöntem)
+        # Verdiğiniz örneğe göre data-src ve src niteliklerini özel olarak arar.
+        for iframe in soup.find_all('iframe'):
+            olasi_kaynaklar = [iframe.get('data-src'), iframe.get('src'), iframe.get('data-url')]
+            for kaynak in olasi_kaynaklar:
+                if kaynak and ("http" in kaynak or kaynak.startswith("//")):
+                    temiz_link = kaynak if kaynak.startswith("http") else "https:" + kaynak
+                    if gecerli_oynatici_mi(temiz_link):
+                        iframe_linki = temiz_link
+                        break
+            if iframe_linki: break
+
+        # 🟢 YÖNTEM 2: Şifrelenmiş Iframe data attributes (Butonlara vs gizlenmişse)
+        if not iframe_linki:
+            for tag in soup.find_all(True):
+                for attr, val in tag.attrs.items():
+                    if isinstance(val, str) and len(val) > 10 and attr.startswith("data-") and not " " in val:
                         dec = decode_iframe(val)
                         if dec and gecerli_oynatici_mi(dec):
                             iframe_linki = dec
                             break
-            if iframe_linki: break
+                if iframe_linki: break
 
-        # 🟢 YÖNTEM 2: Javascript İçindeki Gizli Şifreleri (Base64) Kırma
+        # 🟢 YÖNTEM 3: Javascript İçindeki Gizli Şifreleri (Base64) Kırma
         if not iframe_linki:
             base64_adaylari = set(re.findall(r'[\"\']([a-zA-Z0-9+/=]{40,})[\"\']', html_content))
             for b64 in base64_adaylari:
@@ -158,7 +159,7 @@ def extract_movie_data(film_url):
                     iframe_linki = dec
                     break
 
-        # 🟢 YÖNTEM 3: Raw HTML içindeki tüm düz linkleri zorla bulma
+        # 🟢 YÖNTEM 4: Raw HTML içindeki tüm düz linkleri zorla bulma
         if not iframe_linki:
             tum_linkler = set(re.findall(r'[\"\']((?:https?:)?//[^\s\"\'<>]+)[\"\']', html_content))
             for link in tum_linkler:
