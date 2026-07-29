@@ -11,7 +11,7 @@ from curl_cffi import requests
 # ==========================================
 # ⚙️ SİSTEM AYARLARI
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.cz" # GÜNCEL DOMAIN
+BASE_URL = "https://www.fullhdfilmizlesene.cz"
 DB_FILE = "veritabani.json"
 
 TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
@@ -44,11 +44,24 @@ KATEGORILER = {
     "Yerli Filmler": "/filmizle/yerli-filmler/"
 }
 
+# Proxy kullanıyorsanız (Örn: Tor) Cloudflare Tor IP'lerini sık sık engeller. 
+# Eğer hata devam ederse PROXY'yi devre dışı bırakmayı (PROXY = None) deneyin.
 PROXY = {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}
 session = requests.Session(impersonate="chrome120", proxies=PROXY)
+
+# Sitenin bizi gerçek bir Chrome kullanıcısı sanması için gelişmiş Header'lar
 session.headers.update({
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "tr-TR,tr;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": BASE_URL + "/"
 })
 
@@ -105,7 +118,15 @@ def decode_iframe(s):
 
 def extract_movie_data(film_url):
     try:
+        # ⚠️ IP BAN YEMEMEK İÇİN ZORUNLU BEKLEME - (BOT OLDUĞUMUZU GİZLİYORUZ)
+        time.sleep(random.uniform(1.5, 3.5)) 
+        
         req = session.get(film_url, timeout=15)
+        
+        # EĞER CLOUDFLARE BİZİ ENGELLERSE (403 veya 429 TOO MANY REQUESTS)
+        if req.status_code in [403, 401, 429, 502, 503]:
+            return {"aciklama": "", "iframe": None, "hata": f"Güvenlik Engeli (Kod: {req.status_code})"}
+
         html_content = req.text.replace("\\/", "/")
         soup = BeautifulSoup(html_content, 'html.parser')
         
@@ -127,8 +148,6 @@ def extract_movie_data(film_url):
 
         iframe_linki = None
         
-        # 🟢 YÖNTEM 1: Iframe etiketlerini doğrudan tarama (Öncelikli Yöntem)
-        # Verdiğiniz örneğe göre data-src ve src niteliklerini özel olarak arar.
         for iframe in soup.find_all('iframe'):
             olasi_kaynaklar = [iframe.get('data-src'), iframe.get('src'), iframe.get('data-url')]
             for kaynak in olasi_kaynaklar:
@@ -139,7 +158,6 @@ def extract_movie_data(film_url):
                         break
             if iframe_linki: break
 
-        # 🟢 YÖNTEM 2: Şifrelenmiş Iframe data attributes (Butonlara vs gizlenmişse)
         if not iframe_linki:
             for tag in soup.find_all(True):
                 for attr, val in tag.attrs.items():
@@ -150,22 +168,12 @@ def extract_movie_data(film_url):
                             break
                 if iframe_linki: break
 
-        # 🟢 YÖNTEM 3: Javascript İçindeki Gizli Şifreleri (Base64) Kırma
         if not iframe_linki:
             base64_adaylari = set(re.findall(r'[\"\']([a-zA-Z0-9+/=]{40,})[\"\']', html_content))
             for b64 in base64_adaylari:
                 dec = decode_iframe(b64)
                 if dec and gecerli_oynatici_mi(dec):
                     iframe_linki = dec
-                    break
-
-        # 🟢 YÖNTEM 4: Raw HTML içindeki tüm düz linkleri zorla bulma
-        if not iframe_linki:
-            tum_linkler = set(re.findall(r'[\"\']((?:https?:)?//[^\s\"\'<>]+)[\"\']', html_content))
-            for link in tum_linkler:
-                temiz_link = link if link.startswith("http") else "https:" + link
-                if gecerli_oynatici_mi(temiz_link):
-                    iframe_linki = temiz_link
                     break
 
         if not iframe_linki: return {"aciklama": aciklama, "iframe": None, "hata": "Oynatıcı Bulunamadı"}
@@ -182,7 +190,7 @@ def bot_calistir():
     genel_toplam_yeni_film = 0 
     
     print("\n" + "="*50)
-    print("🚀 İNADINA TV - OYNATICI DOĞRULAMALI DERİN KAZICI")
+    print("🚀 İNADINA TV - BOT (Anti-Ban Önlemleri Aktif)")
     print("="*50)
     
     for kategori_adi, url_yolu in KATEGORILER.items():
@@ -195,18 +203,30 @@ def bot_calistir():
         
         while True:
             try:
-                if sayfa > 1: time.sleep(random.uniform(0.5, 1.5))
+                # Kategori Sayfa geçişlerinde biraz dinlendiriyoruz
+                time.sleep(random.uniform(2.0, 4.0))
+                
                 req = session.get(hedef_url, timeout=20)
                 
-                if sayfa == 1:
-                    gercek_kategori_linki = req.url
-                    if not gercek_kategori_linki.endswith('/'): gercek_kategori_linki += '/'
-
+                # Cloudflare IP Ban kontrolü (Bunu ekledik ki boşuna 0 bulup geçmesin)
+                if req.status_code in [403, 401, 429, 502, 503]:
+                    print(f"  [!!!] DİKKAT: IP Adresiniz Geçici Olarak Engellendi! (Durum Kodu: {req.status_code})")
+                    print("  [!!!] Cloudflare bot olduğumuzu anladı. 2 Dakika bekleniyor...")
+                    time.sleep(120)
+                    continue  # Sayfayı 2 dk sonra tekrar çekmeyi dener
+                
                 if req.status_code == 404: break
 
                 soup = BeautifulSoup(req.content, 'html.parser')
                 film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
-                if not film_listesi: break
+                
+                # Eğer film listesi boşsa Cloudflare doğrulamasına (Captcha) düşmüş olabiliriz
+                if not film_listesi: 
+                    if "Cloudflare" in req.text or "Just a moment..." in req.text:
+                        print("  [!!!] HATA: Cloudflare İnsan Doğrulaması (Captcha) Ekranı Çıktı.")
+                        print("  [!!!] ÇÖZÜM: Proxy / VPN kapatın veya IP adresinizi değiştirin.")
+                        break
+                    break
 
                 print(f"  📄 Sayfa {sayfa} taranıyor... (İncelenen film: {len(film_listesi)})")
                 
@@ -226,10 +246,8 @@ def bot_calistir():
                     afis = ""
                     if img:
                         afis = img.get("data-original") or img.get("data-src") or img.get("data-lazy-src") or img.get("src") or ""
-                        if afis.startswith("//"):
-                            afis = "https:" + afis
-                        elif afis.startswith("/") and not afis.startswith("//"):
-                            afis = BASE_URL + afis
+                        if afis.startswith("//"): afis = "https:" + afis
+                        elif afis.startswith("/") and not afis.startswith("//"): afis = BASE_URL + afis
                     
                     detay = extract_movie_data(film_url)
                     
@@ -247,6 +265,10 @@ def bot_calistir():
                         mevcut_basliklar.append(baslik)
                         kategori_yeni_film_sayisi += 1
                         genel_toplam_yeni_film += 1
+                        
+                        # JSON'u anlık kaydedelim (Çökerse emekler boşa gitmesin)
+                        with open(DB_FILE, "w", encoding="utf-8") as f:
+                            json.dump(veritabani, f, ensure_ascii=False, indent=4)
                     else:
                         print(f"    ❌ Reddedildi ({detay['hata']}): {baslik}")
                         
@@ -273,9 +295,7 @@ def bot_calistir():
         print(f"✅ {kategori_adi} bitti! Toplam {kategori_yeni_film_sayisi} gerçek video çekildi.")
 
     if genel_toplam_yeni_film > 0:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(veritabani, f, ensure_ascii=False, indent=4)
-        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Gerçek Videolu Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {len(veritabani['filmler'])}\n\nVercel siteniz güncellendi! 🚀"
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Yeni Videolu Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {len(veritabani['filmler'])}\n\nVercel siteniz güncellendi! 🚀"
         telegram_mesaj_gonder(tg_mesaj)
 
 if __name__ == "__main__":
