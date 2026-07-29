@@ -11,7 +11,7 @@ from curl_cffi import requests
 # ==========================================
 # ⚙️ SİSTEM AYARLARI
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.nz"
+BASE_URL = "https://www.fullhdfilmizlesene.cz"
 DB_FILE = "veritabani.json"
 
 TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
