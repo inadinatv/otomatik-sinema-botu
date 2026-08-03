@@ -9,9 +9,9 @@ from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 # ==========================================
-# ⚙️ SİSTEM AYARLARI
+# ⚙️ SİSTEM AYARLARI (Güncel Domain: mx)
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.cz"
+BASE_URL = "https://www.fullhdfilmizlesene.mx"
 DB_FILE = "veritabani.json"
 
 TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
@@ -44,10 +44,9 @@ KATEGORILER = {
     "Yerli Filmler": "/filmizle/yerli-filmler/"
 }
 
-# Proxy kullanıyorsanız (Örn: Tor) Cloudflare Tor IP'lerini sık sık engeller. 
-# Eğer hata devam ederse PROXY'yi devre dışı bırakmayı (PROXY = None) deneyin.
-PROXY = {"http": "socks5h://127.0.0.1:40000", "https": "socks5h://127.0.0.1:40000"}
-session = requests.Session(impersonate="chrome120", proxies=PROXY)
+# HATA KAYNAĞI OLAN PROXY DEVRE DIŞI BIRAKILDI
+# Doğrudan sunucu IP'si üzerinden gerçek bir Chrome tarayıcısı gibi bağlanacak.
+session = requests.Session(impersonate="chrome120")
 
 # Sitenin bizi gerçek bir Chrome kullanıcısı sanması için gelişmiş Header'lar
 session.headers.update({
@@ -118,12 +117,11 @@ def decode_iframe(s):
 
 def extract_movie_data(film_url):
     try:
-        # ⚠️ IP BAN YEMEMEK İÇİN ZORUNLU BEKLEME - (BOT OLDUĞUMUZU GİZLİYORUZ)
-        time.sleep(random.uniform(1.5, 3.5)) 
+        # IP BAN YEMEMEK İÇİN ZORUNLU BEKLEME
+        time.sleep(random.uniform(1.5, 3.0)) 
         
         req = session.get(film_url, timeout=15)
         
-        # EĞER CLOUDFLARE BİZİ ENGELLERSE (403 veya 429 TOO MANY REQUESTS)
         if req.status_code in [403, 401, 429, 502, 503]:
             return {"aciklama": "", "iframe": None, "hata": f"Güvenlik Engeli (Kod: {req.status_code})"}
 
@@ -136,10 +134,10 @@ def extract_movie_data(film_url):
             if durum in sayfa_metni: return {"aciklama": "", "iframe": None, "hata": "Yapım Aşamasında / Telif Yemiş"}
 
         aciklama = ""
-        ozet_div = soup.select_one(".ozet, .summary, .film-content, .film-ozeti, div[itemprop='description'], p[itemprop='description']")
+        ozet_div = soup.select_one(".ozet, .summary, .film-content, .film-ozeti, div[itemprop='description'], p[itemprop='description'], .film_detay_icerik")
         if ozet_div: aciklama = ozet_div.text.strip()
         if not aciklama or len(aciklama) < 10:
-            paragraphs = soup.select('article p, .post-content p')
+            paragraphs = soup.select('article p, .post-content p, .film-detail-content p')
             if paragraphs: aciklama = " ".join([p.text.strip() for p in paragraphs if len(p.text.strip()) > 15])
         if not aciklama or len(aciklama) < 10:
             meta_desc = soup.select_one('meta[name="description"]')
@@ -190,7 +188,7 @@ def bot_calistir():
     genel_toplam_yeni_film = 0 
     
     print("\n" + "="*50)
-    print("🚀 İNADINA TV - BOT (Anti-Ban Önlemleri Aktif)")
+    print("🚀 İNADINA TV - BOT (Güncel Domain: .mx - Proxy Kapalı)")
     print("="*50)
     
     for kategori_adi, url_yolu in KATEGORILER.items():
@@ -203,36 +201,41 @@ def bot_calistir():
         
         while True:
             try:
-                # Kategori Sayfa geçişlerinde biraz dinlendiriyoruz
-                time.sleep(random.uniform(2.0, 4.0))
-                
+                time.sleep(random.uniform(2.0, 3.5))
                 req = session.get(hedef_url, timeout=20)
                 
-                # Cloudflare IP Ban kontrolü (Bunu ekledik ki boşuna 0 bulup geçmesin)
                 if req.status_code in [403, 401, 429, 502, 503]:
                     print(f"  [!!!] DİKKAT: IP Adresiniz Geçici Olarak Engellendi! (Durum Kodu: {req.status_code})")
-                    print("  [!!!] Cloudflare bot olduğumuzu anladı. 2 Dakika bekleniyor...")
-                    time.sleep(120)
-                    continue  # Sayfayı 2 dk sonra tekrar çekmeyi dener
+                    print("  [!!!] Cloudflare bot olduğumuzu anladı. 60 Saniye bekleniyor...")
+                    time.sleep(60)
+                    continue 
                 
                 if req.status_code == 404: break
 
                 soup = BeautifulSoup(req.content, 'html.parser')
-                film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li")
                 
-                # Eğer film listesi boşsa Cloudflare doğrulamasına (Captcha) düşmüş olabiliriz
+                # EN GENİŞ HTML SEÇİCİLERİ EKLENDİ
+                film_listesi = soup.select("li.film, div.movie-item, article.film, .movie-list li, .film-box, .film-card, .list-movie, div.item, div.poster, .movie")
+                
                 if not film_listesi: 
                     if "Cloudflare" in req.text or "Just a moment..." in req.text:
                         print("  [!!!] HATA: Cloudflare İnsan Doğrulaması (Captcha) Ekranı Çıktı.")
-                        print("  [!!!] ÇÖZÜM: Proxy / VPN kapatın veya IP adresinizi değiştirin.")
                         break
                     break
 
                 print(f"  📄 Sayfa {sayfa} taranıyor... (İncelenen film: {len(film_listesi)})")
                 
                 for li in film_listesi:
-                    baslik_elem = li.select_one("span.film-title, h2.title, a.title")
+                    # BAŞLIK SEÇİCİLERİ GENİŞLETİLDİ
+                    baslik_elem = li.select_one("span.film-title, h2.title, a.title, .film-name, h3, h2, .name, .baslik")
                     ham_baslik = baslik_elem.text.strip() if baslik_elem else ""
+                    
+                    if not ham_baslik:
+                        # Eğer class içinde bulamazsa a etiketinin title özelliğinden çekmeyi dener
+                        a_tag = li.select_one("a")
+                        if a_tag and a_tag.get("title"):
+                            ham_baslik = a_tag.get("title").strip()
+                            
                     if not ham_baslik: continue
                     baslik = baslik_temizle(ham_baslik)
                     
@@ -240,6 +243,7 @@ def bot_calistir():
 
                     link_elem = li.select_one("a")
                     film_url = link_elem.get("href") if link_elem else ""
+                    if not film_url: continue
                     if not film_url.startswith("http"): film_url = BASE_URL + film_url
                     
                     img = li.select_one("img")
@@ -266,14 +270,14 @@ def bot_calistir():
                         kategori_yeni_film_sayisi += 1
                         genel_toplam_yeni_film += 1
                         
-                        # JSON'u anlık kaydedelim (Çökerse emekler boşa gitmesin)
+                        # Anlık kayıt - Çökmelere karşı önlem
                         with open(DB_FILE, "w", encoding="utf-8") as f:
                             json.dump(veritabani, f, ensure_ascii=False, indent=4)
                     else:
                         print(f"    ❌ Reddedildi ({detay['hata']}): {baslik}")
                         
                 sayfa += 1
-                next_tag = soup.find('a', class_='next') or soup.select_one('.pagination a.next, a.next-page, a.ileri, a.sonraki')
+                next_tag = soup.find('a', class_='next') or soup.select_one('.pagination a.next, a.next-page, a.ileri, a.sonraki, a[rel="next"]')
                 if next_tag and next_tag.get('href') and len(next_tag.get('href')) > 5:
                     next_url = next_tag.get('href')
                     hedef_url = next_url if next_url.startswith('http') else (BASE_URL + next_url if next_url.startswith('/') else BASE_URL + "/" + next_url)
@@ -282,7 +286,7 @@ def bot_calistir():
                     sayfa_bulundu = False
                     for link in olasi_linkler:
                         req_test = session.get(link, timeout=15)
-                        if req_test.status_code == 200 and BeautifulSoup(req_test.content, 'html.parser').select("li.film, div.movie-item, article.film"):
+                        if req_test.status_code == 200 and BeautifulSoup(req_test.content, 'html.parser').select("li.film, div.movie-item, article.film, .film-box, div.item"):
                             hedef_url = link
                             sayfa_bulundu = True
                             break
@@ -295,8 +299,10 @@ def bot_calistir():
         print(f"✅ {kategori_adi} bitti! Toplam {kategori_yeni_film_sayisi} gerçek video çekildi.")
 
     if genel_toplam_yeni_film > 0:
-        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Yeni Videolu Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {len(veritabani['filmler'])}\n\nVercel siteniz güncellendi! 🚀"
+        tg_mesaj = f"🎬 <b>İnadına TV Bot Raporu (.mx)</b>\n\n✅ <b>Tarama Tamamlandı!</b>\n🔥 <b>Eklenen Yeni Videolu Film:</b> {genel_toplam_yeni_film}\n📚 <b>Arşivdeki Toplam Film:</b> {len(veritabani['filmler'])}\n\nSistem başarıyla güncellendi! 🚀"
         telegram_mesaj_gonder(tg_mesaj)
+    else:
+        print("\nℹ️ Hiç yeni film bulunamadı. Veritabanı zaten güncel.")
 
 if __name__ == "__main__":
     bot_calistir()
