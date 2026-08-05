@@ -1,2 +1,5 @@
-curl_cffi
-beautifulsoup4
+curl_cffi>=0.16.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+flaresolverr>=3.3.0
+python-dotenv>=1.0.0
