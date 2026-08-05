@@ -5,17 +5,20 @@ import base64
 import codecs
 import time
 import random
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 from bs4 import BeautifulSoup
 from curl_cffi import requests
 
 # ==========================================
-# ⚙️ SİSTEM AYARLARI (Güncel Domain: mx)
+# ⚙️ SİSTEM AYARLARI
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.mx"
+BASE_URL = "https://fullhdfilmizlesene.co"
 DB_FILE = "veritabani.json"
 
-TELEGRAM_BOT_TOKEN = "8993203057:AAFPHppnI_GJNrsWYJA5OV7NMytpiOg7914" 
-TELEGRAM_CHAT_ID = "666941331"
+# Güvenlik: Hassas bilgileri ortam değişkenlerinden al
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 KATEGORILER = {
     "Aile Filmleri": "/filmizle/aile-filmleri/",
@@ -44,15 +47,44 @@ KATEGORILER = {
     "Yerli Filmler": "/filmizle/yerli-filmler/"
 }
 
-# HATA KAYNAĞI OLAN PROXY DEVRE DIŞI BIRAKILDI
-# Doğrudan sunucu IP'si üzerinden gerçek bir Chrome tarayıcısı gibi bağlanacak.
-session = requests.Session(impersonate="chrome120")
+# ==========================================
+# 🔥 CLOUDFLARE GEÇİŞ ÇÖZÜMLERİ
+# ==========================================
+# Site Cloudflare ile korunmaktadır. Aşağıdaki yöntemlerden birini kullanın:
+# 
+# YÖNTEM 1: FlareSolverr (Önerilen)
+# ---------------------------------
+# 1. Docker ile FlareSolverr çalıştırın:
+#    docker run -d -p 8191:8191 flaresolverr/flaresolverr:latest
+# 
+# 2. FLARESOLVERR_URL ortam değişkenini ayarlayın:
+#    export FLARESOLVERR_URL="http://localhost:8191"
+#
+# YÖNTEM 2: Selenium/Playwright ile Gerçek Tarayıcı
+# --------------------------------------------------
+# pip install selenium webdriver-manager
+# veya
+# pip install playwright && playwright install chromium
+#
+# YÖNTEM 3: Manuel Cookie Ekleme
+# ------------------------------
+# 1. Tarayıcınızda siteyi açın ve Cloudflare'i geçin
+# 2. Developer Tools > Application > Cookies bölümünden
+#    __cf_bm, cf_clearance gibi cookie'leri kopyalayın
+# 3. Ortam değişkeni olarak ekleyin:
+#    export CF_COOKIE="__cf_bm=xxx; cf_clearance=yyy"
+# ==========================================
+
+FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "")
+
+# Session yapılandırması - Cloudflare bypass için en güncel Chrome sürümü
+session = requests.Session(impersonate="chrome124")
 
 # Sitenin bizi gerçek bir Chrome kullanıcısı sanması için gelişmiş Header'lar
-session.headers.update({
+HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
     "Sec-Fetch-Dest": "document",
@@ -60,33 +92,54 @@ session.headers.update({
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Referer": BASE_URL + "/"
-})
+}
+session.headers.update(HEADERS)
 
-def telegram_mesaj_gonder(mesaj):
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "HTML"}
-            session.post(url, json=payload, timeout=10)
-        except: pass
+# Manuel cookie ekleme (eğer ortam değişkeni varsa)
+CF_COOKIE = os.getenv("CF_COOKIE", "")
+if CF_COOKIE:
+    session.cookies.update({"cf_clearance": CF_COOKIE})
 
-def baslik_temizle(baslik):
-    silinecek_kelimeler = [" Türkçe Dublaj İzle", " Türkçe Dublaj", " Full HD İzle", " HD İzle", " 1080p İzle", " Altyazılı İzle", " izle"]
+def telegram_mesaj_gonder(mesaj: str) -> None:
+    """Telegram bot üzerinden mesaj gönderir."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj, "parse_mode": "HTML"}
+        session.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Telegram mesaj hatası: {e}")
+
+
+def baslik_temizle(baslik: str) -> str:
+    """Film başlığını gereksiz ifadelerden temizler."""
+    silinecek_kelimeler = [
+        " Türkçe Dublaj İzle", " Türkçe Dublaj", " Full HD İzle", 
+        " HD İzle", " 1080p İzle", " Altyazılı İzle", " izle"
+    ]
     for kelime in silinecek_kelimeler:
         baslik = re.sub(kelime, "", baslik, flags=re.IGNORECASE)
     return baslik.strip()
 
-def gecerli_oynatici_mi(url):
-    if not url or len(url) < 10: return False
+
+def gecerli_oynatici_mi(url: str) -> bool:
+    """URL'nin geçerli bir video oynatıcı olup olmadığını kontrol eder."""
+    if not url or len(url) < 10:
+        return False
+    
     url_low = url.lower().replace("\\/", "/")
     
     yasakli_uzantilar = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js", ".xml", ".woff", ".ttf", ".ico"]
-    if any(uzanti in url_low for uzanti in yasakli_uzantilar): return False
+    if any(uzanti in url_low for uzanti in yasakli_uzantilar):
+        return False
     
     yasakli_siteler = ["youtube.com", "youtu.be", "vimeo", "fragman", "google.com", "facebook.com", "twitter.com", "imdb.com", "themoviedb.org", "w3.org", "analytics"]
-    if any(yasak in url_low for yasak in yasakli_siteler): return False
+    if any(yasak in url_low for yasak in yasakli_siteler):
+        return False
     
     gecerli_sunucular = [
         "trstx", "vidmoly", "rapidvid", "embed", "player", "vod", "play", 
@@ -94,13 +147,19 @@ def gecerli_oynatici_mi(url):
         "netu", "watch", "ok.ru", "mail.ru", "vk.com", "uqload", "dood",
         "filemoon", "vtube", "mixdrop", "uptobox"
     ]
-    if any(gecerli in url_low for gecerli in gecerli_sunucular): return True
+    if any(gecerli in url_low for gecerli in gecerli_sunucular):
+        return True
     return False
 
-def decode_iframe(s):
-    if not isinstance(s, str) or len(s) < 10: return None
+
+def decode_iframe(s: str) -> Optional[str]:
+    """Base64 veya ROT13 kodlu iframe URL'lerini çözer."""
+    if not isinstance(s, str) or len(s) < 10:
+        return None
+    
     s = s.strip()
     s_pad = s + '=' * (-len(s) % 4)
+    
     for method in ['rot13_b64', 'b64']:
         try:
             if method == 'rot13_b64':
@@ -108,24 +167,71 @@ def decode_iframe(s):
             else:
                 dec = base64.b64decode(s_pad).decode('utf-8', errors='ignore')
             
-            if "http" in dec or dec.startswith("//"): 
+            if "http" in dec or dec.startswith("//"):
                 temiz_link = dec.replace("\\/", "/")
-                if temiz_link.startswith("//"): temiz_link = "https:" + temiz_link
-                if gecerli_oynatici_mi(temiz_link): return temiz_link
-        except: pass
+                if temiz_link.startswith("//"):
+                    temiz_link = "https:" + temiz_link
+                if gecerli_oynatici_mi(temiz_link):
+                    return temiz_link
+        except Exception:
+            pass
     return None
+
+def flaresolverr_request(url: str, method: str = "GET") -> Optional[Any]:
+    """FlareSolverr kullanarak Cloudflare korumalı siteye istek yapar."""
+    if not FLARESOLVERR_URL:
+        return None
+    
+    try:
+        payload = {
+            "cmd": "request.get",
+            "url": url,
+            "maxTimeout": 60000,
+            "session": "film_bot_session"
+        }
+        
+        resp = requests.post(FLARESOLVERR_URL, json=payload, timeout=60)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "ok":
+                return data.get("solution", {}).get("response")
+    except Exception as e:
+        print(f"  [!] FlareSolverr hatası: {e}")
+    return None
+
 
 def extract_movie_data(film_url):
     try:
         # IP BAN YEMEMEK İÇİN ZORUNLU BEKLEME
         time.sleep(random.uniform(1.5, 3.0)) 
         
-        req = session.get(film_url, timeout=15)
+        # Önce FlareSolverr ile dene (eğer yapılandırılmışsa)
+        html_content = None
+        if FLARESOLVERR_URL:
+            response = flaresolverr_request(film_url)
+            if response:
+                html_content = response
         
-        if req.status_code in [403, 401, 429, 502, 503]:
-            return {"aciklama": "", "iframe": None, "hata": f"Güvenlik Engeli (Kod: {req.status_code})"}
+        # FlareSolverr yoksa veya başarısız olduysa normal istek yap
+        if not html_content:
+            req = session.get(film_url, timeout=15)
+            
+            if req.status_code in [403, 401, 429, 502, 503]:
+                # Cloudflare engeli varsa tekrar FlareSolverr dene
+                if FLARESOLVERR_URL:
+                    response = flaresolverr_request(film_url)
+                    if response:
+                        html_content = response
+                    else:
+                        return {"aciklama": "", "iframe": None, "hata": f"Güvenlik Engeli (Kod: {req.status_code})"}
+                else:
+                    return {"aciklama": "", "iframe": None, "hata": f"Güvenlik Engeli (Kod: {req.status_code})"}
+            
+            if not html_content:
+                html_content = req.text.replace("\\/", "/")
+        else:
+            html_content = html_content.replace("\\/", "/")
 
-        html_content = req.text.replace("\\/", "/")
         soup = BeautifulSoup(html_content, 'html.parser')
         
         sayfa_metni = html_content.lower()
@@ -146,8 +252,9 @@ def extract_movie_data(film_url):
 
         iframe_linki = None
         
+        # Iframe'leri bul - daha geniş seçiciler
         for iframe in soup.find_all('iframe'):
-            olasi_kaynaklar = [iframe.get('data-src'), iframe.get('src'), iframe.get('data-url')]
+            olasi_kaynaklar = [iframe.get('data-src'), iframe.get('src'), iframe.get('data-url'), iframe.get('data-link')]
             for kaynak in olasi_kaynaklar:
                 if kaynak and ("http" in kaynak or kaynak.startswith("//")):
                     temiz_link = kaynak if kaynak.startswith("http") else "https:" + kaynak
@@ -156,22 +263,33 @@ def extract_movie_data(film_url):
                         break
             if iframe_linki: break
 
+        # Data attribute'larında kodlanmış linkleri ara
         if not iframe_linki:
             for tag in soup.find_all(True):
                 for attr, val in tag.attrs.items():
-                    if isinstance(val, str) and len(val) > 10 and attr.startswith("data-") and not " " in val:
+                    if isinstance(val, str) and len(val) > 10 and attr.startswith("data-") and " " not in val:
                         dec = decode_iframe(val)
                         if dec and gecerli_oynatici_mi(dec):
                             iframe_linki = dec
                             break
                 if iframe_linki: break
 
+        # Base64 kodlu string'leri dene
         if not iframe_linki:
             base64_adaylari = set(re.findall(r'[\"\']([a-zA-Z0-9+/=]{40,})[\"\']', html_content))
             for b64 in base64_adaylari:
                 dec = decode_iframe(b64)
                 if dec and gecerli_oynatici_mi(dec):
                     iframe_linki = dec
+                    break
+
+        # JavaScript içindeki URL'leri ara
+        if not iframe_linki:
+            js_urls = re.findall(r'(?:var|let|const)\s+\w+\s*=\s*[\"\']([^\"\']+?//[^\"\']+)[\"\']', html_content)
+            for url in js_urls:
+                temiz_url = url.replace("\\/", "/")
+                if gecerli_oynatici_mi(temiz_url):
+                    iframe_linki = temiz_url
                     break
 
         if not iframe_linki: return {"aciklama": aciklama, "iframe": None, "hata": "Oynatıcı Bulunamadı"}
