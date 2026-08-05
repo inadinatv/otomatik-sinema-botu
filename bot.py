@@ -13,7 +13,7 @@ from curl_cffi import requests
 # ==========================================
 # ⚙️ SİSTEM AYARLARI
 # ==========================================
-BASE_URL = "https://www.fullhdfilmizlesene.mx"
+BASE_URL = "https://www.fullhdfilmizlesene.co"
 DB_FILE = "veritabani.json"
 
 # Güvenlik: Hassas bilgileri ortam değişkenlerinden al
