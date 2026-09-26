@@ -61,7 +61,7 @@ vercel --prod
 ## Güncel veri yayınlama seçenekleri
 
 1. **Manuel ve hafif:** `python3 bot.py` çalıştırılır, değişen `veritabani.json` commit edilip Pages/Vercel yeniden deploy edilir.
-2. **Otomatik:** Bot, GitHub Actions gibi zamanlanmış bir görevde çalıştırılır; yalnızca değişen `veritabani.json` commit edilir. Vercel veya Pages Git entegrasyonu yeni commit'i otomatik yayınlar.
+2. **Elle başlatılan Actions:** `.github/workflows/guncelle.yml` yalnızca GitHub Actions içindeki **Run workflow** düğmesiyle çalışır. Site sahibi izinli bir veri/API kaynağı sağlamadan zamanlanmış tarama etkin değildir.
 
 Vercel'in statik siteyi servis etmesi ücretsiz ve basittir; botu sürekli Vercel Function içinde çalıştırmak uygun değildir çünkü dosya sistemi kalıcı değildir ve uzun taramalar serverless çalışma sınırlarına takılabilir.
 
@@ -83,6 +83,8 @@ Gerçek token'ları `.env` veya git deposuna koymayın. `.env.example` yalnızca
 Site 401, 403, 429 veya Cloudflare doğrulama sayfası döndürürse bot **60 saniye bekleyip tekrar tekrar denemez**. Koruma aşılmadan tarama güvenli biçimde durur ve log'a neden yazılır. Bu durumda eski çalışan dosyayı değil, GitHub'daki güncel `bot.py` sürümünü kullandığınızı kontrol edin; eski sürümlerde sonsuz 60 saniye döngüsü bulunuyordu.
 
 Bu bot Cloudflare doğrulamasını aşmaya, CAPTCHA çözmeye veya IP engelini dolaşmaya çalışmaz. Kısa süre sonra manuel olarak tekrar çalıştırın ya da sitenin izin verdiği resmi bir veri/API kaynağı kullanın.
+
+GitHub Actions workflow'undan WARP/VPN ile IP değiştirme adımı özellikle kaldırılmıştır. Bu tür bir adım 403 sorununu güvenilir biçimde çözmez ve erişim politikasını dolaşmaya yönelik olur.
 
 ## Teknik not
 
