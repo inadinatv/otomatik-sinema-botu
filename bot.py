@@ -50,6 +50,10 @@ KATEGORILER = {
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("sinema-botu")
 
+
+class SiteAccessBlocked(RuntimeError):
+    """Site erişim kontrolü uyguladığında taramayı durdurmak için kullanılır."""
+
 session = requests.Session(impersonate="chrome120")
 session.headers.update({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -166,8 +170,16 @@ def fetch_html(url: str) -> str:
     time.sleep(REQUEST_DELAY)
     response = session.get(url, timeout=25)
     if response.status_code in {401, 403, 429}:
-        raise RuntimeError(f"Site erişim kısıtlaması (HTTP {response.status_code}); tekrar denenmeyecek")
+        raise SiteAccessBlocked(
+            f"Site erişimi kısıtladı (HTTP {response.status_code}). "
+            "Koruma aşılmayacak; tarama güvenli biçimde durduruldu."
+        )
     response.raise_for_status()
+    challenge_markers = ("just a moment", "cf-chl-", "cloudflare ray id")
+    if any(marker in response.text.lower() for marker in challenge_markers):
+        raise SiteAccessBlocked(
+            "Cloudflare doğrulama sayfası döndü. Koruma aşılmayacak; tarama durduruldu."
+        )
     return response.text
 
 
@@ -182,6 +194,8 @@ def extract_movie_data(film_url: str) -> dict[str, Any]:
             "kaynaklar": sources,
             "hata": None if sources else "scx içinden oynatıcı kaynağı bulunamadı",
         }
+    except SiteAccessBlocked:
+        raise
     except Exception as exc:
         log.warning("Film okunamadı %s: %s", film_url, exc)
         return {"aciklama": "Veri alınamadı.", "iframe": None, "kaynaklar": [], "hata": str(exc)}
@@ -262,6 +276,10 @@ def run() -> None:
             visited.add(current)
             try:
                 soup = BeautifulSoup(fetch_html(current), "html.parser")
+            except SiteAccessBlocked as exc:
+                log.error("%s", exc)
+                log.error("Tarama sonlandırıldı. Bir süre sonra manuel olarak tekrar deneyin.")
+                return
             except Exception as exc:
                 log.warning("Kategori okunamadı %s: %s", current, exc)
                 break
@@ -272,7 +290,12 @@ def run() -> None:
             for card in cards:
                 if card["url"] in known_urls or card["baslik"] in known_titles:
                     continue
-                details = extract_movie_data(card["url"])
+                try:
+                    details = extract_movie_data(card["url"])
+                except SiteAccessBlocked as exc:
+                    log.error("%s", exc)
+                    log.error("Tarama sonlandırıldı; aynı engeli tekrar tekrar tetiklememek için devam edilmiyor.")
+                    return
                 if not details["iframe"]:
                     log.info("Atlandı (%s): %s", details["hata"], card["baslik"])
                     continue

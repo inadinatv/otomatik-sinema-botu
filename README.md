@@ -78,6 +78,12 @@ TELEGRAM_CHAT_ID=...
 
 Gerçek token'ları `.env` veya git deposuna koymayın. `.env.example` yalnızca şablondur.
 
+## Cloudflare / 403 davranışı
+
+Site 401, 403, 429 veya Cloudflare doğrulama sayfası döndürürse bot **60 saniye bekleyip tekrar tekrar denemez**. Koruma aşılmadan tarama güvenli biçimde durur ve log'a neden yazılır. Bu durumda eski çalışan dosyayı değil, GitHub'daki güncel `bot.py` sürümünü kullandığınızı kontrol edin; eski sürümlerde sonsuz 60 saniye döngüsü bulunuyordu.
+
+Bu bot Cloudflare doğrulamasını aşmaya, CAPTCHA çözmeye veya IP engelini dolaşmaya çalışmaz. Kısa süre sonra manuel olarak tekrar çalıştırın ya da sitenin izin verdiği resmi bir veri/API kaynağı kullanın.
+
 ## Teknik not
 
 Site iframe'i ilk HTML'e doğrudan koymuyor. Film sayfasındaki `scx` nesnesinin `sx.p` / `sx.t` değerleri ROT13 + Base64 ile çözülüyor ve sayfanın kendi embed URL'si `kaynaklar` alanına yazılıyor. Bot CAPTCHA, Cloudflare veya erişim kontrolü aşmaya çalışmaz; medya akışını indirmez.
